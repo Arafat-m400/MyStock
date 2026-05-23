@@ -193,6 +193,6 @@ function addItem() {
     document.getElementById('custom_price').value = '';
     select.value = '';
 }
-function renderCart() { ... same as before ... }
+
 </script>
 <?php include 'includes/footer.php'; ?>

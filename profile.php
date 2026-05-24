@@ -12,6 +12,7 @@ if($_SERVER['REQUEST_METHOD'] == 'POST') {
     if(password_verify($old, $hash)) {
         $new_hash = password_hash($new, PASSWORD_DEFAULT);
         $pdo->prepare("UPDATE users SET password_hash = ? WHERE id = ?")->execute([$new_hash, $_SESSION['user_id']]);
+        logAction($pdo, 'Password Change', "User changed their password");
         $msg = "<div class='alert alert-success'>Password changed!</div>";
     } else {
         $msg = "<div class='alert alert-danger'>Incorrect current password.</div>";

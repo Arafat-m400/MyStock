@@ -61,6 +61,7 @@ if($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['save_purchase'])) {
         }
         
         $pdo->commit();
+        logAction($pdo, 'Stock In', "Purchase Invoice: $invoice_no, Total: $total_amount RWF");
         $message = '<div class="alert alert-success">Purchase recorded! Stock updated with new average cost.</div>';
     } catch(Exception $e) {
         $pdo->rollBack();

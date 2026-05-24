@@ -12,8 +12,10 @@ if($_SERVER['REQUEST_METHOD'] == 'POST') {
     try {
         $stmt = $pdo->prepare("INSERT INTO users (username, password_hash, full_name, role) VALUES (?,?,?,?)");
         $stmt->execute([$username, $password, $full_name, $role]);
+        logAction($pdo, 'Create Worker', "Created worker: $username ($full_name)");
         $message = '<div class="alert alert-success">Worker account created! Username: ' . htmlspecialchars($username) . '</div>';
     } catch(PDOException $e) {
+        logAction($pdo, 'Create Worker', "Failed to create worker: $username ($full_name)");
         $message = '<div class="alert alert-danger">Username already exists!</div>';
     }
 }

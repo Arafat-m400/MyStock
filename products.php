@@ -28,12 +28,15 @@ if($is_admin && $_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['save_produ
     if($id > 0) {
         $stmt = $pdo->prepare("UPDATE products SET name=?, sku=?, category_id=?, reorder_level=?, cost_price=?, selling_price=?, unit=?, description=? WHERE id=?");
         $stmt->execute([$name, $sku, $category_id, $reorder_level, $cost_price, $selling_price, $unit, $description, $id]);
+        logAction($pdo, 'Update Product', "Updated product: $name (SKU: $sku)");
         $message = '<div class="alert alert-success">Product updated!</div>';
     } else {
         $stmt = $pdo->prepare("INSERT INTO products (name, sku, category_id, quantity, reorder_level, cost_price, selling_price, unit, description) VALUES (?,?,?,0,?,?,?,?,?)");
         $stmt->execute([$name, $sku, $category_id, $reorder_level, $cost_price, $selling_price, $unit, $description]);
         $message = '<div class="alert alert-success">Product added!</div>';
+        logAction($pdo, 'Add Product', "Added product: $name (SKU: $sku)");
     }
+    $stmt->execute([...]);
 }
 
 $products = $pdo->query("SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id ORDER BY p.name")->fetchAll();

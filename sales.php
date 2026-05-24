@@ -81,6 +81,16 @@ if($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_sale'])) {
         }
 
         $pdo->commit();
+        $pdo->commit();
+
+// LOG THIS ACTION
+logAction($pdo, 'Sale Completed', "Invoice: $invoice_no, Total: $grand_total RWF by " . $_SESSION['username']);
+
+$message = '<div class="alert alert-success">✅ Sale completed!
+            Invoice: <strong>' . $invoice_no . '</strong> &nbsp;
+            <a href="view_invoice.php?id=' . $sale_id . '" target="_blank"
+               class="btn btn-sm btn-outline-success">🖨 View Invoice</a></div>';
+               
         $message = '<div class="alert alert-success">✅ Sale completed!
                     Invoice: <strong>' . $invoice_no . '</strong> &nbsp;
                     <a href="view_invoice.php?id=' . $sale_id . '" target="_blank"
@@ -96,13 +106,28 @@ if($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_sale'])) {
 }
 
 // Sales history
-$sales_list = $pdo->query(
-    "SELECT s.*, c.name as customer_name, u.full_name as cashier
-     FROM sales s
-     LEFT JOIN customers c ON s.customer_id = c.id
-     LEFT JOIN users u ON s.created_by = u.id
-     ORDER BY s.created_at DESC"
-)->fetchAll();
+// Only show relevant sales based on user role
+if(isAdmin()) {
+    $sales_list = $pdo->query(
+        "SELECT s.*, c.name as customer_name, u.full_name as cashier
+         FROM sales s
+         LEFT JOIN customers c ON s.customer_id = c.id
+         LEFT JOIN users u ON s.created_by = u.id
+         ORDER BY s.created_at DESC"
+    )->fetchAll();
+} else {
+    // Worker sees only their own sales
+    $stmt = $pdo->prepare(
+        "SELECT s.*, c.name as customer_name, u.full_name as cashier
+         FROM sales s
+         LEFT JOIN customers c ON s.customer_id = c.id
+         LEFT JOIN users u ON s.created_by = u.id
+         WHERE s.created_by = ?
+         ORDER BY s.created_at DESC"
+    );
+    $stmt->execute([$_SESSION['user_id']]);
+    $sales_list = $stmt->fetchAll();
+}
 
 include 'includes/header.php';
 include 'includes/sidebar.php';

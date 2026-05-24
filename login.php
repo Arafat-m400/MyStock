@@ -16,9 +16,11 @@ if($_SERVER['REQUEST_METHOD'] == 'POST') {
         $_SESSION['username'] = $user['username'];
         $_SESSION['full_name'] = $user['full_name'];
         $_SESSION['role'] = $user['role'];
+        logAction($pdo, 'Login', "User logged in from " . $_SERVER['REMOTE_ADDR']);
         redirect('index.php');
     } else {
         $error = 'Invalid username or password!';
+        logAction($pdo, 'Login Failed', "Failed login attempt for user: $username from " . $_SERVER['REMOTE_ADDR']);
     }
 }
 ?>

@@ -33,5 +33,18 @@ function redirect($url) {
 
 function generateInvoiceNo($prefix = 'INV') {
     return $prefix . '-' . date('Ymd') . '-' . rand(1000, 9999);
+
+    function logAction($pdo, $action, $details = '') {
+    if(isset($_SESSION['user_id'])) {
+        $stmt = $pdo->prepare("INSERT INTO audit_log (user_id, username, action, details, ip_address) VALUES (?, ?, ?, ?, ?)");
+        $stmt->execute([
+            $_SESSION['user_id'],
+            $_SESSION['username'],
+            $action,
+            $details,
+            $_SERVER['REMOTE_ADDR'] ?? 'CLI'
+        ]);
+    }
+}
 }
 ?>

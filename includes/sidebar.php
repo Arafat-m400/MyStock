@@ -28,6 +28,9 @@
         <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'reports.php' ? 'active' : ''; ?>" href="reports.php">
             <i class="fas fa-chart-line me-2"></i>Reports
         </a>
+        <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'audit_log.php' ? 'active' : ''; ?>" href="audit_log.php">
+    <i class="fas fa-history me-2"></i>Audit Log
+</a>
         <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'users.php' ? 'active' : ''; ?>" href="users.php">
             <i class="fas fa-user-cog me-2"></i>User Management
         </a>

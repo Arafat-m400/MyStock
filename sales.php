@@ -6,159 +6,267 @@ $message = '';
 $products = $pdo->query("SELECT id, name, selling_price, quantity FROM products WHERE quantity > 0 ORDER BY name")->fetchAll();
 $customers = $pdo->query("SELECT id, name FROM customers ORDER BY name")->fetchAll();
 
-// Process sale
+// ─── Process sale ────────────────────────────────────────────────────────────
 if($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_sale'])) {
     try {
         $pdo->beginTransaction();
-        
+
         $customer_id = $_POST['customer_id'] ?: null;
-        $discount = $_POST['discount'] ?? 0;
-        $items = json_decode($_POST['items_json'], true);
-        
-        if(empty($items)) throw new Exception("No items in sale");
-        
-        $subtotal = 0;
+        $discount    = floatval($_POST['discount'] ?? 0);
+        $items       = json_decode($_POST['items_json'], true);
+
+        if(empty($items)) throw new Exception("No items added to the sale.");
+
+        $subtotal        = 0;
         $sale_items_data = [];
-        
+
         foreach($items as $item) {
             $product = $pdo->prepare("SELECT * FROM products WHERE id = ?");
             $product->execute([$item['product_id']]);
             $prod = $product->fetch();
-            if(!$prod) throw new Exception("Product not found");
-            if($prod['quantity'] < $item['quantity']) throw new Exception("Insufficient stock for " . $prod['name']);
-            
-            $item_subtotal = $item['quantity'] * $prod['selling_price'];
-            $subtotal += $item_subtotal;
+
+            if(!$prod) throw new Exception("Product not found (ID: {$item['product_id']}).");
+            if($prod['quantity'] < $item['quantity'])
+                throw new Exception("Insufficient stock for \"{$prod['name']}\". Available: {$prod['quantity']}.");
+
+            // ── FIX #2: use the custom price from JS if it was set ──────────
+            $unit_price    = floatval($item['price']);   // passed from cart JS
+            $item_subtotal = $item['quantity'] * $unit_price;
+            $subtotal     += $item_subtotal;
+
             $sale_items_data[] = [
-                'product_id' => $prod['id'],
-                'quantity' => $item['quantity'],
-                'selling_price' => $prod['selling_price'],
-                'cost_price' => $prod['cost_price'],
-                'subtotal' => $item_subtotal
+                'product_id'   => $prod['id'],
+                'quantity'     => $item['quantity'],
+                'selling_price'=> $unit_price,            // actual price charged
+                'cost_price'   => $prod['cost_price'],
+                'subtotal'     => $item_subtotal
             ];
         }
-        
+
         $grand_total = $subtotal - $discount;
+        if($grand_total < 0) $grand_total = 0;
+
         $invoice_no = generateInvoiceNo('INV');
-        $sale_date = date('Y-m-d');
-        
-        $stmt = $pdo->prepare("INSERT INTO sales (customer_id, invoice_no, sale_date, subtotal, discount, grand_total, created_by) VALUES (?,?,?,?,?,?,?)");
+        $sale_date  = date('Y-m-d');
+
+        $stmt = $pdo->prepare(
+            "INSERT INTO sales (customer_id, invoice_no, sale_date, subtotal, discount, grand_total, created_by)
+             VALUES (?,?,?,?,?,?,?)"
+        );
         $stmt->execute([$customer_id, $invoice_no, $sale_date, $subtotal, $discount, $grand_total, $_SESSION['user_id']]);
         $sale_id = $pdo->lastInsertId();
-        
+
         foreach($sale_items_data as $item) {
-            $stmt = $pdo->prepare("INSERT INTO sale_items (sale_id, product_id, quantity, selling_price, cost_price_at_sale, subtotal) VALUES (?,?,?,?,?,?)");
-            $stmt->execute([$sale_id, $item['product_id'], $item['quantity'], $item['selling_price'], $item['cost_price'], $item['subtotal']]);
-            
-            // Update stock
-            $pdo->prepare("UPDATE products SET quantity = quantity - ? WHERE id = ?")->execute([$item['quantity'], $item['product_id']]);
+            $stmt = $pdo->prepare(
+                "INSERT INTO sale_items (sale_id, product_id, quantity, selling_price, cost_price_at_sale, subtotal)
+                 VALUES (?,?,?,?,?,?)"
+            );
+            $stmt->execute([
+                $sale_id,
+                $item['product_id'],
+                $item['quantity'],
+                $item['selling_price'],   // ← custom/real price saved here
+                $item['cost_price'],
+                $item['subtotal']
+            ]);
+            // Deduct stock
+            $pdo->prepare("UPDATE products SET quantity = quantity - ? WHERE id = ?")
+                ->execute([$item['quantity'], $item['product_id']]);
         }
-        
-        // Update customer total spent
+
+        // Update customer total_spent
         if($customer_id) {
-            $pdo->prepare("UPDATE customers SET total_spent = total_spent + ? WHERE id = ?")->execute([$grand_total, $customer_id]);
+            $pdo->prepare("UPDATE customers SET total_spent = total_spent + ? WHERE id = ?")
+                ->execute([$grand_total, $customer_id]);
         }
-        
+
         $pdo->commit();
-        $message = '<div class="alert alert-success">Sale completed! Invoice: ' . $invoice_no . ' <a href="view_invoice.php?id=' . $sale_id . '" target="_blank">View Invoice</a></div>';
+        $message = '<div class="alert alert-success">✅ Sale completed!
+                    Invoice: <strong>' . $invoice_no . '</strong> &nbsp;
+                    <a href="view_invoice.php?id=' . $sale_id . '" target="_blank"
+                       class="btn btn-sm btn-outline-success">🖨 View Invoice</a></div>';
+
+        // Refresh product list after sale (stock changed)
+        $products = $pdo->query("SELECT id, name, selling_price, quantity FROM products WHERE quantity > 0 ORDER BY name")->fetchAll();
+
     } catch(Exception $e) {
         $pdo->rollBack();
-        $message = '<div class="alert alert-danger">Error: ' . $e->getMessage() . '</div>';
+        $message = '<div class="alert alert-danger">❌ Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
     }
 }
 
-// Fetch sales list
-$sales_list = $pdo->query("SELECT s.*, c.name as customer_name, u.full_name as cashier FROM sales s LEFT JOIN customers c ON s.customer_id = c.id LEFT JOIN users u ON s.created_by = u.id ORDER BY s.created_at DESC")->fetchAll();
+// Sales history
+$sales_list = $pdo->query(
+    "SELECT s.*, c.name as customer_name, u.full_name as cashier
+     FROM sales s
+     LEFT JOIN customers c ON s.customer_id = c.id
+     LEFT JOIN users u ON s.created_by = u.id
+     ORDER BY s.created_at DESC"
+)->fetchAll();
 
 include 'includes/header.php';
 include 'includes/sidebar.php';
 ?>
+
 <div class="col-md-10 p-4">
-    <h2 class="mb-4">Sales</h2>
+    <h2 class="mb-4"><i class="fas fa-cash-register me-2"></i>Sales</h2>
     <?php echo $message; ?>
-    
-    <!-- Sale Form -->
-    <div class="card mb-4">
+
+    <!-- ── New Sale Form ──────────────────────────────────────────────────── -->
+    <div class="card mb-4 shadow-sm">
         <div class="card-header bg-primary text-white">
-            <h5 class="mb-0">New Sale</h5>
+            <h5 class="mb-0"><i class="fas fa-plus-circle me-2"></i>New Sale</h5>
         </div>
         <div class="card-body">
-            <form id="saleForm" method="POST">
+            <!-- FIX #3: set items_json on submit via onsubmit handler -->
+            <form id="saleForm" method="POST" onsubmit="return prepareSubmit()">
+
                 <div class="row mb-3">
                     <div class="col-md-4">
-                        <label>Customer</label>
+                        <label class="form-label">Customer</label>
                         <select name="customer_id" class="form-control" id="customer_id">
                             <option value="">Walk-in Customer</option>
                             <?php foreach($customers as $c): ?>
-                            <option value="<?php echo $c['id']; ?>"><?php echo htmlspecialchars($c['name']); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="col-md-4">
-                        <label>Discount</label>
-                        <input type="number" step="0.01" name="discount" id="discount" class="form-control" value="0">
-                    </div>
-                </div>
-                
-                <div class="mb-3">
-                    <label>Add Product</label>
-                    <div class="input-group">
-                        <select id="product_select" class="form-control">
-                            <option value="">Select Product</option>
-                            <?php foreach($products as $p): ?>
-                            <option value="<?php echo $p['id']; ?>" data-price="<?php echo $p['selling_price']; ?>" data-name="<?php echo htmlspecialchars($p['name']); ?>" data-stock="<?php echo $p['quantity']; ?>">
-                                <?php echo htmlspecialchars($p['name']); ?> - <?php echo number_format($p['selling_price'], 2); ?> (Stock: <?php echo $p['quantity']; ?>)
+                            <option value="<?php echo $c['id']; ?>">
+                                <?php echo htmlspecialchars($c['name']); ?>
                             </option>
                             <?php endforeach; ?>
                         </select>
-                        <input type="number" id="quantity" class="form-control" placeholder="Qty" style="width:100px"><br>
-                        <input type="number" id="custom_price" class="form-control" placeholder="Price (optional)" step="0.01" style="width:120px">
-                        <button type="button" class="btn btn-secondary" onclick="addItem()">Add</button>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Discount (RWF)</label>
+                        <input type="number" step="0.01" min="0" name="discount"
+                               id="discount" class="form-control" value="0"
+                               oninput="updateTotals()">
                     </div>
                 </div>
-                
-                <div class="table-responsive">
-                    <table class="table table-bordered" id="items_table">
-                        <thead>
-                            <tr><th>Product</th><th>Qty</th><th>Price</th><th>Subtotal</th><th></th></tr>
+
+                <!-- Add product row -->
+                <div class="mb-3">
+                    <label class="form-label">Add Product to Cart</label>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-5">
+                            <select id="product_select" class="form-control">
+                                <option value="">— Select Product —</option>
+                                <?php foreach($products as $p): ?>
+                                <option value="<?php echo $p['id']; ?>"
+                                        data-price="<?php echo $p['selling_price']; ?>"
+                                        data-name="<?php echo htmlspecialchars($p['name']); ?>"
+                                        data-stock="<?php echo $p['quantity']; ?>">
+                                    <?php echo htmlspecialchars($p['name']); ?>
+                                    — <?php echo number_format($p['selling_price'], 0); ?> RWF
+                                    (Stock: <?php echo $p['quantity']; ?>)
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <input type="number" id="qty_input" class="form-control"
+                                   placeholder="Qty" min="1" value="1">
+                        </div>
+                        <div class="col-md-3">
+                            <input type="number" id="custom_price_input" class="form-control"
+                                   placeholder="Custom price (optional)" step="0.01" min="0">
+                            <small class="text-muted">Leave blank to use default price</small>
+                        </div>
+                        <div class="col-md-2">
+                            <button type="button" class="btn btn-secondary w-100"
+                                    onclick="addItem()">
+                                <i class="fas fa-plus"></i> Add
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Cart table -->
+                <div class="table-responsive mb-3">
+                    <table class="table table-bordered table-sm" id="items_table">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Product</th>
+                                <th style="width:90px">Qty</th>
+                                <th style="width:140px">Unit Price</th>
+                                <th style="width:130px">Subtotal</th>
+                                <th style="width:50px"></th>
+                            </tr>
                         </thead>
-                        <tbody id="cart_items"></tbody>
+                        <tbody id="cart_body">
+                            <tr id="empty_row">
+                                <td colspan="5" class="text-center text-muted py-3">
+                                    No items yet — add a product above.
+                                </td>
+                            </tr>
+                        </tbody>
                         <tfoot>
-                            <tr><th colspan="3" class="text-end">Subtotal:</th><th id="subtotal_display">0.00</th><th></th></tr>
-                            <tr><th colspan="3" class="text-end">Discount:</th><th id="discount_display">0.00</th><th></th></tr>
-                            <tr><th colspan="3" class="text-end">Grand Total:</th><th id="grand_total_display">0.00</th><th></th></tr>
+                            <tr class="table-light">
+                                <th colspan="3" class="text-end">Subtotal:</th>
+                                <th id="subtotal_display">0 RWF</th><th></th>
+                            </tr>
+                            <tr class="table-warning">
+                                <th colspan="3" class="text-end">Discount:</th>
+                                <th id="discount_display">0 RWF</th><th></th>
+                            </tr>
+                            <tr class="table-success">
+                                <th colspan="3" class="text-end">Grand Total:</th>
+                                <th id="grand_total_display">0 RWF</th><th></th>
+                            </tr>
                         </tfoot>
                     </table>
                 </div>
-                
+
+                <!-- Hidden field — populated on submit -->
                 <input type="hidden" name="items_json" id="items_json">
-                <button type="submit" name="process_sale" class="btn btn-success btn-lg">Complete Sale</button>
+
+                <button type="submit" name="process_sale"
+                        class="btn btn-success btn-lg">
+                    <i class="fas fa-check-circle me-2"></i>Complete Sale
+                </button>
             </form>
         </div>
     </div>
-    
-    <!-- Sales History -->
-    <div class="card">
+
+    <!-- ── Sales History ──────────────────────────────────────────────────── -->
+    <div class="card shadow-sm">
         <div class="card-header">
-            <h5>Sales History</h5>
+            <h5 class="mb-0"><i class="fas fa-history me-2"></i>Sales History</h5>
         </div>
         <div class="card-body">
             <div class="table-responsive">
-                <table class="table">
-                    <thead>
-                        <tr><th>Invoice #</th><th>Customer</th><th>Date</th><th>Total</th><th>Cashier</th><th>Action</th></tr>
+                <table class="table table-hover">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Invoice #</th>
+                            <th>Customer</th>
+                            <th>Date</th>
+                            <th>Subtotal</th>
+                            <th>Discount</th>
+                            <th>Grand Total</th>
+                            <th>Cashier</th>
+                            <th>Action</th>
+                        </tr>
                     </thead>
                     <tbody>
+                        <?php if(empty($sales_list)): ?>
+                        <tr><td colspan="8" class="text-center text-muted">No sales yet.</td></tr>
+                        <?php else: ?>
                         <?php foreach($sales_list as $sale): ?>
                         <tr>
-                            <td><?php echo $sale['invoice_no']; ?></td>
+                            <td><strong><?php echo htmlspecialchars($sale['invoice_no']); ?></strong></td>
                             <td><?php echo htmlspecialchars($sale['customer_name'] ?? 'Walk-in'); ?></td>
                             <td><?php echo $sale['sale_date']; ?></td>
-                            <td><?php echo number_format($sale['grand_total'], 2); ?></td>
+                            <td><?php echo number_format($sale['subtotal'], 0); ?> RWF</td>
+                            <td class="text-danger"><?php echo number_format($sale['discount'], 0); ?> RWF</td>
+                            <td><strong><?php echo number_format($sale['grand_total'], 0); ?> RWF</strong></td>
                             <td><?php echo htmlspecialchars($sale['cashier']); ?></td>
-                            <td><a href="view_invoice.php?id=<?php echo $sale['id']; ?>" class="btn btn-sm btn-info" target="_blank">View Invoice</a></td>
+                            <td>
+                                <a href="view_invoice.php?id=<?php echo $sale['id']; ?>"
+                                   class="btn btn-sm btn-info" target="_blank">
+                                    <i class="fas fa-file-invoice"></i> Invoice
+                                </a>
+                            </td>
                         </tr>
                         <?php endforeach; ?>
+                        <?php endif; ?>
                     </tbody>
                 </table>
             </div>
@@ -166,33 +274,147 @@ include 'includes/sidebar.php';
     </div>
 </div>
 
+<!-- ── JavaScript: cart logic ─────────────────────────────────────────────── -->
 <script>
+// Cart array — each item: { product_id, name, quantity, price }
 let cart = [];
+
 function addItem() {
-    let select = document.getElementById('product_select');
-    let productId = select.value;
-    if(!productId) return alert('Select product');
-    let productName = select.options[select.selectedIndex].dataset.name;
-    let defaultPrice = parseFloat(select.options[select.selectedIndex].dataset.price);
-    let quantity = parseInt(document.getElementById('quantity').value);
-    let customPrice = parseFloat(document.getElementById('custom_price').value);
-    
-    // Use custom price if valid, else default price
-    let price = (!isNaN(customPrice) && customPrice > 0) ? customPrice : defaultPrice;
-    
-    if(isNaN(quantity) || quantity < 1) return alert('Enter valid quantity');
-    
-    let existing = cart.find(i => i.product_id == productId);
-    if(existing) {
-        existing.quantity += quantity;
-    } else {
-        cart.push({ product_id: productId, name: productName, quantity: quantity, price: price });
+    const select   = document.getElementById('product_select');
+    const productId = select.value;
+    if (!productId) { alert('Please select a product first.'); return; }
+
+    const opt          = select.options[select.selectedIndex];
+    const productName  = opt.dataset.name;
+    const defaultPrice = parseFloat(opt.dataset.price);
+    const stock        = parseInt(opt.dataset.stock);
+
+    const qtyInput     = document.getElementById('qty_input');
+    const customPriceInput = document.getElementById('custom_price_input');
+
+    const qty = parseInt(qtyInput.value);
+    if (isNaN(qty) || qty < 1) { alert('Enter a valid quantity (at least 1).'); return; }
+
+    // Use custom price if filled and valid, else fall back to default
+    const customPrice = parseFloat(customPriceInput.value);
+    const price = (!isNaN(customPrice) && customPrice > 0) ? customPrice : defaultPrice;
+
+    // Check stock
+    const alreadyInCart = cart.find(i => i.product_id == productId);
+    const alreadyQty    = alreadyInCart ? alreadyInCart.quantity : 0;
+    if (alreadyQty + qty > stock) {
+        alert(`Not enough stock for "${productName}". Available: ${stock}, already in cart: ${alreadyQty}.`);
+        return;
     }
+
+    if (alreadyInCart) {
+        alreadyInCart.quantity += qty;
+        // If a new custom price is explicitly set, update it
+        if (!isNaN(customPrice) && customPrice > 0) alreadyInCart.price = price;
+    } else {
+        cart.push({ product_id: productId, name: productName, quantity: qty, price: price });
+    }
+
     renderCart();
-    document.getElementById('quantity').value = '';
-    document.getElementById('custom_price').value = '';
+
+    // Reset inputs
+    qtyInput.value = 1;
+    customPriceInput.value = '';
     select.value = '';
 }
 
+function removeItem(index) {
+    cart.splice(index, 1);
+    renderCart();
+}
+
+function renderCart() {
+    const tbody  = document.getElementById('cart_body');
+    const emptyRow = document.getElementById('empty_row');
+
+    // Clear existing rows except the empty placeholder
+    tbody.innerHTML = '';
+
+    if (cart.length === 0) {
+        tbody.innerHTML = `<tr id="empty_row">
+            <td colspan="5" class="text-center text-muted py-3">
+                No items yet — add a product above.
+            </td></tr>`;
+        updateTotals();
+        return;
+    }
+
+    cart.forEach((item, index) => {
+        const subtotal = item.quantity * item.price;
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${escHtml(item.name)}</td>
+            <td>
+                <input type="number" min="1" value="${item.quantity}"
+                       class="form-control form-control-sm"
+                       onchange="updateQty(${index}, this.value)">
+            </td>
+            <td>
+                <input type="number" min="0" step="0.01" value="${item.price.toFixed(2)}"
+                       class="form-control form-control-sm"
+                       onchange="updatePrice(${index}, this.value)">
+            </td>
+            <td>${numberFmt(subtotal)} RWF</td>
+            <td>
+                <button type="button" class="btn btn-sm btn-danger"
+                        onclick="removeItem(${index})">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>`;
+        tbody.appendChild(row);
+    });
+
+    updateTotals();
+}
+
+function updateQty(index, val) {
+    const qty = parseInt(val);
+    if (!isNaN(qty) && qty > 0) {
+        cart[index].quantity = qty;
+        renderCart();
+    }
+}
+
+function updatePrice(index, val) {
+    const p = parseFloat(val);
+    if (!isNaN(p) && p >= 0) {
+        cart[index].price = p;
+        renderCart();
+    }
+}
+
+function updateTotals() {
+    const subtotal  = cart.reduce((sum, i) => sum + i.quantity * i.price, 0);
+    const discount  = parseFloat(document.getElementById('discount').value) || 0;
+    const grandTotal = Math.max(0, subtotal - discount);
+
+    document.getElementById('subtotal_display').textContent    = numberFmt(subtotal)   + ' RWF';
+    document.getElementById('discount_display').textContent    = numberFmt(discount)   + ' RWF';
+    document.getElementById('grand_total_display').textContent = numberFmt(grandTotal) + ' RWF';
+}
+
+// ── FIX #3: populate items_json right before the form submits ───────────────
+function prepareSubmit() {
+    if (cart.length === 0) {
+        alert('Please add at least one product to the sale.');
+        return false;  // block submission
+    }
+    document.getElementById('items_json').value = JSON.stringify(cart);
+    return true;       // allow submission
+}
+
+function numberFmt(n) {
+    return new Intl.NumberFormat('en-RW').format(Math.round(n));
+}
+
+function escHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 </script>
+
 <?php include 'includes/footer.php'; ?>

@@ -79,16 +79,25 @@ if(isset($_GET['view']) && is_numeric($_GET['view'])) {
     $view_supplier = $stmt->fetch();
 
     if($view_supplier) {
-        $stmt2 = $pdo->prepare(
-            "SELECT p.*, pr.name AS product_name
-             FROM purchases p
-             JOIN products pr ON p.product_id = pr.id
-             WHERE p.supplier_id = ?
-             ORDER BY p.purchase_date DESC"
-        );
-        $stmt2->execute([(int)$_GET['view']]);
-        $supplier_history = $stmt2->fetchAll();
-    }
+    $stmt2 = $pdo->prepare(
+        "SELECT 
+            p.invoice_no,
+            p.purchase_date,
+            p.total_amount,
+            pi.product_id,
+            pi.quantity,
+            pi.unit_price,
+            pi.subtotal,
+            pr.name AS product_name
+         FROM purchases p
+         JOIN purchase_items pi ON p.id = pi.purchase_id
+         JOIN products pr ON pi.product_id = pr.id
+         WHERE p.supplier_id = ?
+         ORDER BY p.purchase_date DESC, p.id DESC"
+    );
+    $stmt2->execute([(int)$_GET['view']]);
+    $supplier_history = $stmt2->fetchAll();
+}
 }
 
 include 'includes/header.php';
@@ -119,27 +128,27 @@ include 'includes/sidebar.php';
                 <table class="table table-hover">
                     <thead class="table-light">
                         <tr>
-                            <th>Ref #</th>
-                            <th>Product</th>
-                            <th>Qty</th>
-                            <th>Unit Cost</th>
-                            <th>Total Cost</th>
-                            <th>Date</th>
+                            <th>Invoice #</th>
+<th>Product</th>
+<th>Qty</th>
+<th>Unit Price</th>
+<th>Subtotal</th>
+<th>Date</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php
                         $grand_total_purchased = 0;
                         foreach($supplier_history as $ph):
-                            $grand_total_purchased += $ph['total_cost'];
+                            $grand_total_purchased += $ph['subtotal'];
                         ?>
                         <tr>
-                            <td><?php echo htmlspecialchars($ph['reference_no'] ?? '—'); ?></td>
-                            <td><?php echo htmlspecialchars($ph['product_name']); ?></td>
-                            <td><?php echo number_format($ph['quantity']); ?></td>
-                            <td><?php echo number_format($ph['unit_cost'], 0); ?> RWF</td>
-                            <td><?php echo number_format($ph['total_cost'], 0); ?> RWF</td>
-                            <td><?php echo $ph['purchase_date']; ?></td>
+                            <td><?php echo htmlspecialchars($ph['invoice_no'] ?? '—'); ?></td>
+<td><?php echo htmlspecialchars($ph['product_name']); ?></td>
+<td><?php echo number_format($ph['quantity']); ?></td>
+<td><?php echo number_format($ph['unit_price'], 0); ?> RWF</td>
+<td><?php echo number_format($ph['subtotal'], 0); ?> RWF</td>
+<td><?php echo $ph['purchase_date']; ?></td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>

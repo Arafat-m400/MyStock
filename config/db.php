@@ -47,4 +47,33 @@ function generateInvoiceNo($prefix = 'INV') {
     }
 }
 }
+
+function logAction($pdo, $action, $details = '') {
+    try {
+        // Create table if not exists (safety check)
+        $pdo->exec("CREATE TABLE IF NOT EXISTS audit_log (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT,
+            username VARCHAR(50),
+            action VARCHAR(100),
+            details TEXT,
+            ip_address VARCHAR(45),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )");
+        
+        if(isset($_SESSION['user_id'])) {
+            $stmt = $pdo->prepare("INSERT INTO audit_log (user_id, username, action, details, ip_address) VALUES (?, ?, ?, ?, ?)");
+            $stmt->execute([
+                $_SESSION['user_id'],
+                $_SESSION['username'] ?? 'unknown',
+                $action,
+                $details,
+                $_SERVER['REMOTE_ADDR'] ?? 'CLI'
+            ]);
+        }
+    } catch(PDOException $e) {
+        // Silent fail - don't break the app if logging fails
+        error_log("LogAction failed: " . $e->getMessage());
+    }
+}
 ?>

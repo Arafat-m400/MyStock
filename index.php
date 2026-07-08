@@ -1,119 +1,133 @@
 <?php
 require_once 'config/db.php';
-if(!isLoggedIn()) redirect('login.php');
 
-// Get dashboard stats
-$total_products = $pdo->query("SELECT COUNT(*) FROM products")->fetchColumn();
-$total_sales = $pdo->query("SELECT COUNT(*) FROM sales")->fetchColumn();
-$total_customers = $pdo->query("SELECT COUNT(*) FROM customers")->fetchColumn();
-$low_stock_count = $pdo->query("SELECT COUNT(*) FROM products WHERE quantity <= reorder_level")->fetchColumn();
+// If not logged in, redirect to login
+if (!isLoggedIn()) {
+    redirect('login.php');
+}
 
-// Recent sales
-$recent_sales = $pdo->query("SELECT s.*, c.name as customer_name FROM sales s LEFT JOIN customers c ON s.customer_id = c.id ORDER BY s.created_at DESC LIMIT 5")->fetchAll();
+// If user only has one branch, redirect directly
+if (count($_SESSION['user_branches'] ?? []) == 1) {
+    $branch_id = $_SESSION['user_branches'][0];
+    switchBranch($branch_id);
+    redirect('branch/dashboard.php');
+}
 
-// Low stock products
-$low_stock_products = $pdo->query("SELECT * FROM products WHERE quantity <= reorder_level LIMIT 10")->fetchAll();
+// Get user's branches
+$branches = getUserBranches($pdo, $_SESSION['user_id']);
+
+// ... rest of the branch selection code ...
+
+// If no branches, show error
+if (empty($branches)) {
+    $error = 'You do not have access to any branches. Please contact your administrator.';
+}
 
 include 'includes/header.php';
-include 'includes/sidebar.php';
 ?>
-<div class="col-md-10 p-4">
-    <h2 class="mb-4">Dashboard</h2>
-    
-    <div class="row mb-4">
-        <div class="col-md-3 mb-3">
-            <div class="card card-stats bg-primary text-white">
-                <div class="card-body">
-                    <h5 class="card-title">Total Products</h5>
-                    <h2><?php echo $total_products; ?></h2>
-                </div>
+
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <!-- Header -->
+            <div class="text-center mb-5">
+                <h1 class="display-4">
+                    <i class="fas fa-store-alt text-primary"></i> MyStock
+                </h1>
+                <p class="lead text-muted">Welcome back, <?php echo htmlspecialchars($_SESSION['full_name']); ?>!</p>
+                <p class="text-muted">Select your branch to continue</p>
             </div>
-        </div>
-        <div class="col-md-3 mb-3">
-            <div class="card card-stats bg-success text-white">
-                <div class="card-body">
-                    <h5 class="card-title">Total Sales</h5>
-                    <h2><?php echo $total_sales; ?></h2>
-                </div>
+            
+            <?php if(isset($error)): ?>
+            <div class="alert alert-danger text-center">
+                <i class="fas fa-exclamation-circle me-2"></i>
+                <?php echo $error; ?>
             </div>
-        </div>
-        <div class="col-md-3 mb-3">
-            <div class="card card-stats bg-info text-white">
-                <div class="card-body">
-                    <h5 class="card-title">Customers</h5>
-                    <h2><?php echo $total_customers; ?></h2>
+            <?php else: ?>
+            
+            <!-- Branch Grid -->
+            <div class="row g-4">
+                <?php foreach($branches as $branch): ?>
+                <div class="col-md-4 col-sm-6">
+                    <a href="select_branch.php?id=<?php echo $branch['id']; ?>" class="text-decoration-none">
+                        <div class="card branch-card shadow-sm h-100">
+                            <div class="card-body text-center p-4">
+                                <div class="branch-icon mb-3">
+                                    <i class="fas fa-store-alt"></i>
+                                </div>
+                                <h5 class="card-title"><?php echo htmlspecialchars($branch['name']); ?></h5>
+                                <p class="card-text text-muted small">
+                                    <i class="fas fa-map-marker-alt me-1"></i>
+                                    <?php echo htmlspecialchars($branch['location'] ?? 'Location not set'); ?>
+                                </p>
+                                <?php if($branch['phone']): ?>
+                                <p class="card-text text-muted small">
+                                    <i class="fas fa-phone me-1"></i>
+                                    <?php echo htmlspecialchars($branch['phone']); ?>
+                                </p>
+                                <?php endif; ?>
+                                <div class="mt-2">
+                                    <span class="badge bg-<?php echo $branch['role'] == 'admin' ? 'danger' : ($branch['role'] == 'manager' ? 'warning' : 'info'); ?>">
+                                        <i class="fas fa-<?php echo $branch['role'] == 'admin' ? 'crown' : ($branch['role'] == 'manager' ? 'user-tie' : 'user'); ?> me-1"></i>
+                                        <?php echo ucfirst($branch['role']); ?>
+                                    </span>
+                                    <?php if($branch['status'] == 'active'): ?>
+                                    <span class="badge bg-success"><i class="fas fa-circle me-1"></i>Active</span>
+                                    <?php else: ?>
+                                    <span class="badge bg-danger"><i class="fas fa-circle me-1"></i>Inactive</span>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        </div>
+                    </a>
                 </div>
+                <?php endforeach; ?>
             </div>
-        </div>
-        <div class="col-md-3 mb-3">
-            <div class="card card-stats <?php echo $low_stock_count > 0 ? 'bg-warning' : 'bg-secondary'; ?> text-white">
-                <div class="card-body">
-                    <h5 class="card-title">Low Stock Alerts</h5>
-                    <h2><?php echo $low_stock_count; ?></h2>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <?php if($low_stock_count > 0): ?>
-    <div class="alert alert-low-stock mb-4">
-        <i class="fas fa-exclamation-triangle me-2"></i>
-        <strong>Low Stock Alert:</strong> You have <?php echo $low_stock_count; ?> product(s) that need reordering.
-    </div>
-    <?php endif; ?>
-    
-    <div class="row">
-        <div class="col-md-6">
-            <div class="card">
-                <div class="card-header bg-white">
-                    <h5>Recent Sales</h5>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-sm">
-                            <thead>
-                                <tr><th>Invoice #</th><th>Customer</th><th>Date</th><th>Total</th></tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach($recent_sales as $sale): ?>
-                                <tr>
-                                    <td><?php echo htmlspecialchars($sale['invoice_no']); ?></td>
-                                    <td><?php echo htmlspecialchars($sale['customer_name'] ?? 'Walk-in'); ?></td>
-                                    <td><?php echo $sale['sale_date']; ?></td>
-                                    <td><?php echo number_format($sale['grand_total'], 2); ?></td>
-                                </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6">
-            <div class="card">
-                <div class="card-header bg-white">
-                    <h5>Low Stock Products</h5>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-sm">
-                            <thead>
-                                <tr><th>Product</th><th>Current Stock</th><th>Reorder Level</th></tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach($low_stock_products as $product): ?>
-                                <tr>
-                                    <td><?php echo htmlspecialchars($product['name']); ?></td>
-                                    <td class="text-danger"><?php echo $product['quantity']; ?></td>
-                                    <td><?php echo $product['reorder_level']; ?></td>
-                                </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+            <?php endif; ?>
+            
+            <!-- Footer -->
+            <div class="text-center mt-5">
+                <a href="logout.php" class="text-muted text-decoration-none">
+                    <i class="fas fa-sign-out-alt me-1"></i>Logout
+                </a>
+                <?php if(isAdmin()): ?>
+                <span class="text-muted mx-2">|</span>
+                <a href="admin/branches.php" class="text-primary text-decoration-none">
+                    <i class="fas fa-cog me-1"></i>Manage Branches
+                </a>
+                <?php endif; ?>
             </div>
         </div>
     </div>
 </div>
+
+<style>
+.branch-card {
+    transition: all 0.3s ease;
+    border: 2px solid transparent;
+    border-radius: 15px;
+    cursor: pointer;
+}
+.branch-card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 15px 30px rgba(0,0,0,0.15) !important;
+    border-color: #0d6efd;
+}
+.branch-icon {
+    width: 70px;
+    height: 70px;
+    background: #e7f1ff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+    font-size: 30px;
+    color: #0d6efd;
+}
+.branch-icon i {
+    color: #0d6efd;
+}
+</style>
+
 <?php include 'includes/footer.php'; ?>

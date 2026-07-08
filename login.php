@@ -1,26 +1,49 @@
 <?php
 require_once 'config/db.php';
-if(isLoggedIn()) redirect('index.php');
+
+// If already logged in, redirect to branch selection
+if (isLoggedIn()) {
+    redirect('index.php');
+}
 
 $error = '';
-if($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $username = $_POST['username'];
+$success = '';
+
+// Process login
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    $username = trim($_POST['username']);
     $password = $_POST['password'];
     
-    $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ?");
-    $stmt->execute([$username]);
-    $user = $stmt->fetch();
-    
-    if($user && password_verify($password, $user['password_hash'])) {
-        $_SESSION['user_id'] = $user['id'];
-        $_SESSION['username'] = $user['username'];
-        $_SESSION['full_name'] = $user['full_name'];
-        $_SESSION['role'] = $user['role'];
-        logAction($pdo, 'Login', "User logged in from " . $_SERVER['REMOTE_ADDR']);
-        redirect('index.php');
+    if (empty($username) || empty($password)) {
+        $error = 'Please enter username and password.';
     } else {
-        $error = 'Invalid username or password!';
-        logAction($pdo, 'Login Failed', "Failed login attempt for user: $username from " . $_SERVER['REMOTE_ADDR']);
+        $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ? AND status = 'active'");
+        $stmt->execute([$username]);
+        $user = $stmt->fetch();
+        
+        if ($user && password_verify($password, $user['password_hash'])) {
+            // Set session
+            $_SESSION['user_id'] = $user['id'];
+            $_SESSION['username'] = $user['username'];
+            $_SESSION['full_name'] = $user['full_name'];
+            $_SESSION['role'] = $user['role'];
+            
+            // Get user's branches
+            $branches = getUserBranches($pdo, $user['id']);
+            $_SESSION['user_branches'] = array_column($branches, 'id');
+            
+            // Log login
+            logAction($pdo, 'Login', "User logged in from " . ($_SERVER['REMOTE_ADDR'] ?? '127.0.0.1'));
+            
+            // Update last login
+            $pdo->prepare("UPDATE users SET last_login = NOW() WHERE id = ?")->execute([$user['id']]);
+            
+            // Redirect to branch selection
+            redirect('index.php');
+        } else {
+            $error = 'Invalid username or password.';
+            logAction($pdo, 'Login Failed', "Failed login attempt for: $username");
+        }
     }
 }
 ?>
@@ -29,44 +52,154 @@ if($_SERVER['REQUEST_METHOD'] == 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - MyStock</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>Login - MyStock v2.0</title>
+    
+    <!-- Bootstrap 5 (with offline fallback) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="assets/css/style.css">
+    
+    <!-- Font Awesome (with offline fallback) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
     <style>
-        body { background: linear-gradient(135deg, #0a58ca 0%, #0d6efd 100%); height: 100vh; }
-        .login-card { border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
-        .btn-login { background: #0d6efd; color: white; border-radius: 10px; }
+        body {
+            background: linear-gradient(135deg, #0a58ca 0%, #0d6efd 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .login-container {
+            max-width: 420px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .login-card {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .login-logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .login-logo i {
+            font-size: 60px;
+            color: #0d6efd;
+            background: #e7f1ff;
+            padding: 20px;
+            border-radius: 50%;
+        }
+        .login-logo h2 {
+            margin-top: 15px;
+            font-weight: 700;
+            color: #1a2a3a;
+        }
+        .login-logo p {
+            color: #6c757d;
+            font-size: 14px;
+        }
+        .form-floating {
+            margin-bottom: 15px;
+        }
+        .btn-login {
+            background: #0d6efd;
+            color: white;
+            padding: 12px;
+            font-weight: 600;
+            border-radius: 10px;
+            width: 100%;
+            border: none;
+            transition: all 0.3s;
+        }
+        .btn-login:hover {
+            background: #0a58ca;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(13, 110, 253, 0.3);
+        }
+        .login-footer {
+            text-align: center;
+            margin-top: 20px;
+            color: #6c757d;
+            font-size: 13px;
+        }
+        .login-footer a {
+            color: #0d6efd;
+            text-decoration: none;
+        }
+        .branch-select {
+            margin-top: 15px;
+        }
+        .form-control:focus {
+            border-color: #0d6efd;
+            box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.25);
+        }
+        .alert {
+            border-radius: 10px;
+        }
+        @media (max-width: 576px) {
+            .login-card {
+                padding: 25px;
+                margin: 10px;
+            }
+            .login-logo i {
+                font-size: 40px;
+                padding: 15px;
+            }
+        }
     </style>
 </head>
-<body class="d-flex align-items-center">
+<body>
     <div class="container">
-        <div class="row justify-content-center">
-            <div class="col-md-4">
-                <div class="card login-card">
-                    <div class="card-body p-4">
-                        <h3 class="text-center mb-4"><i class="fas fa-boxes"></i> MyStock</h3>
-                        <h5 class="text-center mb-4">Login to your account</h5>
-                        <?php if($error): ?>
-                            <div class="alert alert-danger"><?php echo $error; ?></div>
-                        <?php endif; ?>
-                        <form method="POST">
-                            <div class="mb-3">
-                                <label>Username</label>
-                                <input type="text" name="username" class="form-control" required>
-                            </div>
-                            <div class="mb-3">
-                                <label>Password</label>
-                                <input type="password" name="password" class="form-control" required>
-                            </div>
-                            <button type="submit" class="btn btn-login w-100">Login</button>
-                        </form>
-                        <div class="text-center mt-3 small text-muted">
-                            <i class="fas fa-shield-alt"></i> Demo: admin / password
-                        </div>
+        <div class="login-container">
+            <div class="login-card">
+                <div class="login-logo">
+                    <i class="fas fa-store-alt"></i>
+                    <h2>MyStock</h2>
+                    <p>Enterprise Stock Management</p>
+                </div>
+                
+                <?php if($error): ?>
+                <div class="alert alert-danger alert-dismissible fade show">
+                    <i class="fas fa-exclamation-circle me-2"></i>
+                    <?php echo $error; ?>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+                <?php endif; ?>
+                
+                <?php if($success): ?>
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle me-2"></i>
+                    <?php echo $success; ?>
+                </div>
+                <?php endif; ?>
+                
+                <form method="POST">
+                    <div class="form-floating">
+                        <input type="text" class="form-control" id="username" name="username" placeholder="Username" required>
+                        <label for="username"><i class="fas fa-user me-2"></i>Username</label>
                     </div>
+                    <div class="form-floating">
+                        <input type="password" class="form-control" id="password" name="password" placeholder="Password" required>
+                        <label for="password"><i class="fas fa-lock me-2"></i>Password</label>
+                    </div>
+                    <button type="submit" class="btn-login">
+                        <i class="fas fa-sign-in-alt me-2"></i>Login
+                    </button>
+                </form>
+                
+                <div class="login-footer">
+                    <small>
+                        <i class="fas fa-shield-alt me-1"></i>
+                        Demo: admin / admin123
+                    </small>
                 </div>
             </div>
         </div>
     </div>
+    
+    <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

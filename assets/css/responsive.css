@@ -1,0 +1,276 @@
+/* ============================================
+   MyStock v2.0 - Responsive Styles
+   Mobile-First Design
+   ============================================ */
+
+/* ============================================
+   Mobile First (Default)
+   ============================================ */
+
+/* Small screens (phones) */
+@media (max-width: 576px) {
+    /* Typography */
+    h1 { font-size: 1.8rem; }
+    h2 { font-size: 1.5rem; }
+    h3 { font-size: 1.2rem; }
+    h4 { font-size: 1rem; }
+    h5 { font-size: 0.9rem; }
+    
+    /* Layout */
+    .container-fluid {
+        padding: 0 10px;
+    }
+    .p-4 {
+        padding: 15px !important;
+    }
+    .p-3 {
+        padding: 10px !important;
+    }
+    .m-4 {
+        margin: 15px !important;
+    }
+    
+    /* Cards */
+    .card-body {
+        padding: 15px;
+    }
+    .card-header {
+        padding: 12px 15px;
+    }
+    
+    /* Stats Cards - 2 columns on mobile */
+    .stat-card .stat-value {
+        font-size: 20px;
+    }
+    .stat-card .stat-icon {
+        width: 40px;
+        height: 40px;
+        font-size: 18px;
+    }
+    
+    /* Tables - Card View on Mobile */
+    .table-responsive {
+        border: none;
+    }
+    .table thead {
+        display: none;
+    }
+    .table tbody tr {
+        display: block;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        margin-bottom: 10px;
+        padding: 10px;
+    }
+    .table tbody td {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 5px 0;
+        border: none;
+    }
+    .table tbody td:before {
+        content: attr(data-label);
+        font-weight: 600;
+        color: #6c757d;
+        font-size: 12px;
+    }
+    
+    /* Forms */
+    .form-control, .form-select {
+        font-size: 16px; /* Prevents iOS zoom */
+        padding: 8px 12px;
+    }
+    
+    /* Buttons - Full width on mobile */
+    .btn {
+        width: 100%;
+        margin-bottom: 5px;
+    }
+    .btn-group {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+    }
+    .btn-group .btn {
+        border-radius: 8px !important;
+    }
+    
+    /* Modal */
+    .modal-dialog {
+        margin: 10px;
+    }
+    .modal-body {
+        padding: 15px;
+    }
+    
+    /* Navbar */
+    .navbar-brand {
+        font-size: 1rem !important;
+    }
+    .branch-badge {
+        font-size: 0.6rem !important;
+        padding: 2px 8px !important;
+    }
+    
+    /* Grid - Single column */
+    .row {
+        margin: 0 -5px;
+    }
+    .col-md-3, .col-md-4, .col-md-6 {
+        padding: 0 5px;
+    }
+}
+
+/* ============================================
+   Tablet (Medium screens)
+   ============================================ */
+
+@media (min-width: 577px) and (max-width: 992px) {
+    /* Typography */
+    h1 { font-size: 2.2rem; }
+    h2 { font-size: 1.8rem; }
+    h3 { font-size: 1.4rem; }
+    
+    /* Layout */
+    .p-4 {
+        padding: 20px !important;
+    }
+    
+    /* Stats Cards - 3 columns on tablet */
+    .stat-card .stat-value {
+        font-size: 24px;
+    }
+    
+    /* Tables - Keep header but responsive */
+    .table {
+        font-size: 14px;
+    }
+    .table td, .table th {
+        padding: 8px 10px;
+    }
+    
+    /* Buttons - Inline on tablet */
+    .btn {
+        width: auto;
+    }
+    
+    /* Sidebar - Collapsible on tablet */
+    .sidebar {
+        position: fixed;
+        top: 60px;
+        left: -280px;
+        width: 280px;
+        height: 100vh;
+        background: white;
+        z-index: 1040;
+        transition: left 0.3s ease;
+        overflow-y: auto;
+        box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+    }
+    .sidebar.show {
+        left: 0;
+    }
+    .sidebar-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 1039;
+    }
+    .sidebar-overlay.show {
+        display: block;
+    }
+}
+
+/* ============================================
+   Desktop (Large screens)
+   ============================================ */
+
+@media (min-width: 993px) {
+    /* Full layout */
+    .container-fluid {
+        padding: 0 20px;
+    }
+    
+    /* Stats Cards - 4 columns */
+    .stat-card .stat-value {
+        font-size: 28px;
+    }
+    
+    /* Tables - Full width */
+    .table {
+        font-size: 15px;
+    }
+    .table td, .table th {
+        padding: 12px 15px;
+    }
+    
+    /* Hover effects only on desktop */
+    .hover-lift:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    }
+    
+    /* Multiple columns for dashboard */
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 20px;
+    }
+}
+
+/* ============================================
+   Touch-Friendly (All Devices)
+   ============================================ */
+
+/* Larger touch targets for mobile */
+@media (hover: none) and (pointer: coarse) {
+    .btn, .nav-link, .dropdown-item, 
+    .table a, .card a, 
+    input, select, textarea {
+        min-height: 44px;
+        min-width: 44px;
+        padding: 10px 15px;
+    }
+    
+    /* Prevent accidental clicks */
+    .dropdown-menu {
+        padding: 10px 0;
+    }
+    .dropdown-item {
+        padding: 12px 20px;
+    }
+}
+
+/* ============================================
+   Dark Mode (Optional)
+   ============================================ */
+
+@media (prefers-color-scheme: dark) {
+    /* Will be implemented in future update */
+}
+
+/* ============================================
+   Print Styles (Overrides)
+   ============================================ */
+
+@media print {
+    .sidebar, .navbar, footer, .no-print {
+        display: none !important;
+    }
+    body {
+        background: white !important;
+    }
+    .card {
+        box-shadow: none !important;
+        border: 1px solid #ddd !important;
+    }
+    .table td, .table th {
+        padding: 5px !important;
+    }
+}

@@ -24,6 +24,7 @@
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     
     <script>
+        // Auto-dismiss alerts
         document.addEventListener('DOMContentLoaded', function() {
             setTimeout(function() {
                 document.querySelectorAll('.alert:not(.alert-permanent)').forEach(function(alert) {
@@ -32,6 +33,15 @@
                 });
             }, 5000);
         });
+
+        // Prevent back button after logout
+        <?php if(!isLoggedIn()): ?>
+        window.addEventListener('pageshow', function(event) {
+            if (event.persisted) {
+                window.location.href = 'login.php';
+            }
+        });
+        <?php endif; ?>
     </script>
 </body>
 </html>

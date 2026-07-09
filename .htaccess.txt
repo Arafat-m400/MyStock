@@ -1,0 +1,41 @@
+# ============================================
+# MyStock v2.0 - Apache Configuration
+# ============================================
+
+# Prevent caching
+<IfModule mod_headers.c>
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+</IfModule>
+
+# Prevent directory listing
+Options -Indexes
+
+# Protect sensitive files
+<FilesMatch "^(config|includes|admin/includes)">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Protect .env and .sql files
+<FilesMatch "\.(env|sql|log|ini|sh|bat)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Protect PHP files from direct access (except index)
+<FilesMatch "\.php$">
+    # Allow specific files
+    <FilesMatch "^(index|login|logout|profile|dashboard|products|sales|purchases|purchase_orders|expenses|debts|suppliers|customers|reports|end_of_day|view_invoice|view_po|categories|branches|users|settings|select_branch|fix_branches_complete|reset_admin_password)\.php$">
+        Order allow,deny
+        Allow from all
+    </FilesMatch>
+</FilesMatch>
+
+# Default charset
+AddDefaultCharset UTF-8
+
+# Error documents
+ErrorDocument 404 /MyStock/error/404.php
+ErrorDocument 403 /MyStock/error/403.php

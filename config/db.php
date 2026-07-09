@@ -1,8 +1,12 @@
 <?php
 // ============================================
 // MyStock v2.0 - Database Configuration
-// Offline-Ready
 // ============================================
+
+// Prevent caching of all pages
+header("Cache-Control: no-cache, no-store, must-revalidate");
+header("Pragma: no-cache");
+header("Expires: 0");
 
 // Database settings
 $host = 'localhost';
@@ -23,7 +27,9 @@ try {
 }
 
 // Session management
-session_start();
+if (session_status() == PHP_SESSION_NONE) {
+    session_start();
+}
 
 // ============================================
 // SESSION FUNCTIONS
@@ -160,7 +166,7 @@ function getLowStockProducts($pdo, $branch_id = null) {
 }
 
 // ============================================
-// WHATSAPP FUNCTIONS (offline-ready)
+// WHATSAPP FUNCTIONS
 // ============================================
 
 function getWhatsAppLink($phone, $message) {
@@ -194,24 +200,21 @@ function generatePOMessage($po_number, $supplier_name, $items, $total) {
 }
 
 // ============================================
-// REQUIRE LOGIN CHECK
+// REQUIRE FUNCTIONS
 // ============================================
 
-// Check if user is logged in (for pages that require login)
 function requireLogin() {
     if (!isLoggedIn()) {
         redirect('login.php');
     }
 }
 
-// Check if user has branch access
 function requireBranchAccess() {
     if (!getCurrentBranch()) {
-        redirect('index.php');
+        redirect('../index.php');
     }
 }
 
-// Check if user is admin
 function requireAdmin() {
     if (!isAdmin()) {
         redirect('index.php');

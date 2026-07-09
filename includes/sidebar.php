@@ -59,9 +59,6 @@
         <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'settings.php' ? 'active' : ''; ?>" href="../admin/settings.php">
             <i class="fas fa-cog me-2"></i>Settings
         </a>
-        <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'profile.php' ? 'active' : ''; ?>" href="../profile.php">
-            <i class="fas fa-user-circle me-2"></i>Profile
-        </a>
         <?php endif; ?>
         
         <div class="nav-section">Account</div>

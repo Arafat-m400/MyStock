@@ -148,8 +148,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_stock'])) {
 }
 
 include '../includes/header.php';
+include '../includes/sidebar.php';
 ?>
-
+<div class="col-md-10 main-content">
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
     <div>
         <h2><i class="fas fa-truck me-2 text-primary"></i>Stock In / Purchases</h2>
@@ -346,5 +347,5 @@ PURCHASE HISTORY
         </div>
     </div>
 </div>
-
+</div>
 <?php include '../includes/footer.php'; ?>

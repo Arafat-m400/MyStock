@@ -167,8 +167,9 @@ if (isset($_GET['view']) && is_numeric($_GET['view'])) {
 }
 
 include '../includes/header.php';
+include '../includes/sidebar.php';
 ?>
-
+<div class="col-md-10 main-content">
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
     <div>
         <h2><i class="fas fa-users me-2 text-primary"></i>Customers</h2>
@@ -601,5 +602,5 @@ CUSTOMERS LIST
     margin-top: 5px;
 }
 </style>
-
+</div>
 <?php include '../includes/footer.php'; ?>

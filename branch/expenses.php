@@ -124,8 +124,9 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit']) && $is_admin) {
 }
 
 include '../includes/header.php';
+include '../includes/sidebar.php';
 ?>
-
+<div class="col-md-10 main-content">
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
     <div>
         <h2><i class="fas fa-money-bill-wave me-2 text-primary"></i>Expenses</h2>
@@ -492,5 +493,5 @@ function setDateRange(days) {
     margin-top: 5px;
 }
 </style>
-
+</div>
 <?php include '../includes/footer.php'; ?>

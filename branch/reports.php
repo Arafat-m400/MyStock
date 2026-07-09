@@ -162,8 +162,9 @@ if ($report_type == 'customers') {
 }
 
 include '../includes/header.php';
+include '../includes/sidebar.php';
 ?>
-
+<div class="col-md-10 main-content">
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
     <div>
         <h2><i class="fas fa-chart-line me-2 text-primary"></i>Reports</h2>
@@ -623,5 +624,5 @@ function setDateRange(days) {
     }
 }
 </style>
-
+</div>
 <?php include '../includes/footer.php'; ?>

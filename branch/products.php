@@ -176,8 +176,9 @@ if ($detail_product) {
 }
 
 include '../includes/header.php';
+include '../includes/sidebar.php';
 ?>
-
+<div class="col-md-10 main-content">
 <!-- ============================================
 PRODUCTS PAGE
 ============================================ -->
@@ -779,5 +780,5 @@ document.addEventListener('DOMContentLoaded', function() {
     border-radius: 10px;
 }
 </style>
-
+</div>
 <?php include '../includes/footer.php'; ?>

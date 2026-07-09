@@ -50,19 +50,38 @@
         
         <?php if(isAdmin()): ?>
         <div class="nav-section">Admin</div>
-        <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'branches.php' ? 'active' : ''; ?>" href="../admin/branches.php">
+        <?php 
+        // Determine correct path for admin links
+        $admin_path = '';
+        $current_dir = basename(dirname($_SERVER['PHP_SELF']));
+        if ($current_dir == 'admin') {
+            $admin_path = '';
+        } else {
+            $admin_path = '../admin/';
+        }
+        ?>
+        <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'branches.php' ? 'active' : ''; ?>" href="<?php echo $admin_path; ?>branches.php">
             <i class="fas fa-building me-2"></i>Branches
         </a>
-        <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'users.php' ? 'active' : ''; ?>" href="../admin/users.php">
+        <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'users.php' ? 'active' : ''; ?>" href="<?php echo $admin_path; ?>users.php">
             <i class="fas fa-users-cog me-2"></i>Users
         </a>
-        <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'settings.php' ? 'active' : ''; ?>" href="../admin/settings.php">
+        <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'settings.php' ? 'active' : ''; ?>" href="<?php echo $admin_path; ?>settings.php">
             <i class="fas fa-cog me-2"></i>Settings
         </a>
         <?php endif; ?>
         
         <div class="nav-section">Account</div>
-        <a class="nav-link text-danger" href="../logout.php">
+        <?php 
+        // Determine correct path for logout
+        $logout_path = '';
+        if ($current_dir == 'admin') {
+            $logout_path = '../';
+        } else {
+            $logout_path = '';
+        }
+        ?>
+        <a class="nav-link text-danger" href="<?php echo $logout_path; ?>logout.php">
             <i class="fas fa-sign-out-alt me-2"></i>Logout
         </a>
     </nav>

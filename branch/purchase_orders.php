@@ -316,8 +316,9 @@ if (isset($_GET['receive']) && is_numeric($_GET['receive'])) {
 }
 
 include '../includes/header.php';
+include '../includes/sidebar.php';
 ?>
-
+<div class="col-md-10 main-content">
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
     <div>
         <h2><i class="fas fa-file-purchase me-2 text-primary"></i>Purchase Orders</h2>
@@ -798,5 +799,5 @@ document.addEventListener('keydown', function(e) {
     }
 });
 </script>
-
+</div>
 <?php include '../includes/footer.php'; ?>

@@ -2,7 +2,6 @@
         </div> <!-- Close container-fluid -->
     </div> <!-- Close wrapper -->
 
-    <!-- Footer -->
     <footer class="bg-white border-top py-2 mt-auto">
         <div class="container-fluid">
             <div class="row">
@@ -21,9 +20,7 @@
         </div>
     </footer>
 
-    <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- jQuery -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     
     <script>
@@ -36,6 +33,15 @@
                 });
             }, 5000);
         });
+
+        // Prevent back button after logout
+        <?php if(!isLoggedIn()): ?>
+        window.addEventListener('pageshow', function(event) {
+            if (event.persisted) {
+                window.location.href = 'login.php';
+            }
+        });
+        <?php endif; ?>
     </script>
 </body>
 </html>

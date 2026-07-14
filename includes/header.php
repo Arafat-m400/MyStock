@@ -4,10 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MyStock v2.0 - <?php echo $_SESSION['branch_name'] ?? 'Enterprise'; ?></title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     
-    <!-- Bootstrap 5 -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
-    <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <style>
@@ -25,7 +26,6 @@
             overflow-x: hidden;
         }
         
-        /* Navbar */
         .navbar-mystock {
             background: linear-gradient(135deg, #0a58ca 0%, #0d6efd 100%);
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
@@ -64,7 +64,6 @@
             margin-right: 5px;
         }
         
-        /* Sidebar */
         .sidebar {
             background: white;
             min-height: calc(100vh - 56px);
@@ -104,14 +103,12 @@
             letter-spacing: 0.5px;
         }
         
-        /* Main Content */
         .main-content {
             padding: 20px;
             background: #f0f2f5;
             min-height: calc(100vh - 56px);
         }
         
-        /* Cards */
         .stat-card {
             background: white;
             border-radius: 12px;
@@ -135,7 +132,6 @@
             margin: 0;
         }
         
-        /* Responsive */
         @media (max-width: 768px) {
             .sidebar {
                 min-height: auto;
@@ -155,16 +151,17 @@
             }
         }
         
-        /* Tables */
         .table-container {
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
         }
-        
-        /* Utilities */
         .text-primary { color: #0d6efd !important; }
         .bg-primary { background: #0d6efd !important; }
         .cursor-pointer { cursor: pointer; }
+        
+        .back-btn {
+            display: inline-block;
+        }
     </style>
 </head>
 <body>

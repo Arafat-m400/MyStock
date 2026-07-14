@@ -45,9 +45,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['save_settings'])) {
 
 $settings = $pdo->query("SELECT * FROM settings WHERE id=1")->fetch();
 
-include '../includes/header.php';
+include 'includes/admin_header.php';
 ?>
-
+<div class="col-md-10 main-content">
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
     <div>
         <h2><i class="fas fa-cog me-2 text-primary"></i>System Settings</h2>
@@ -125,5 +125,5 @@ include '../includes/header.php';
         </form>
     </div>
 </div>
-
+</div>
 <?php include '../includes/footer.php'; ?>

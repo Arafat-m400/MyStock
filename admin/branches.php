@@ -89,9 +89,9 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
     $edit_branch = $stmt->fetch();
 }
 
-include '../includes/header.php';
+include 'includes/admin_header.php';
 ?>
-
+<div class="col-md-10 main-content">
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
     <div>
         <h2><i class="fas fa-building me-2 text-primary"></i>Manage Branches</h2>
@@ -251,5 +251,5 @@ BRANCHES LIST
     </div>
 </div>
 <?php endif; ?>
-
+</div>
 <?php include '../includes/footer.php'; ?>

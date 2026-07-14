@@ -155,8 +155,9 @@ $eod_history->execute([$branch_id]);
 $eod_history = $eod_history->fetchAll();
 
 include '../includes/header.php';
+include '../includes/sidebar.php';
 ?>
-
+<div class="col-md-10 main-content">
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
     <div>
         <h2><i class="fas fa-calendar-check me-2 text-primary"></i>End of Day</h2>
@@ -434,5 +435,5 @@ EOD HISTORY
     margin-top: 5px;
 }
 </style>
-
+</div>
 <?php include '../includes/footer.php'; ?>

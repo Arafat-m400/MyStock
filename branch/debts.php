@@ -175,8 +175,9 @@ $overdue_customer = count(array_filter($customer_debts, function($d) { return $d
 $overdue_supplier = count(array_filter($supplier_debts, function($d) { return $d['status'] == 'overdue'; }));
 
 include '../includes/header.php';
+include '../includes/sidebar.php';
 ?>
-
+<div class="col-md-10 main-content">
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
     <div>
         <h2><i class="fas fa-hand-holding-usd me-2 text-primary"></i>Debt Management</h2>
@@ -191,6 +192,7 @@ include '../includes/header.php';
 <!-- ============================================
 SUMMARY STATS
 ============================================ -->
+
 <div class="row g-3 mb-4">
     <div class="col-md-3 col-6">
         <div class="stat-card bg-danger text-white">
@@ -500,5 +502,5 @@ document.getElementById('payment_amount').addEventListener('input', function() {
     font-weight: 700;
 }
 </style>
-
+</div>
 <?php include '../includes/footer.php'; ?>

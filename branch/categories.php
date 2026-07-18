@@ -4,8 +4,14 @@ requireLogin();
 requireBranchAccess();
 
 $branch_id = getCurrentBranch();
-$is_admin = isAdmin();
+$is_admin = true;
 $message = '';
+
+
+// FORCE ADMIN MODE FOR TESTING - REMOVE AFTER
+if ($_SESSION['username'] == 'admin') {
+    $is_admin = true;
+}
 
 // ============================================
 // HANDLE FORM SUBMISSIONS

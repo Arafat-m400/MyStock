@@ -31,6 +31,35 @@ if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
 
+// ══════════════════════════════════════════════════════════════════
+//  PATH CONTEXT HELPER
+//  Works out which folder the CURRENT page lives in (root / branch /
+//  admin) and builds 3 prefixes so every link — sidebar, header
+//  dropdown, redirects — points to the right place no matter which
+//  folder the current script is sitting in.
+// ══════════════════════════════════════════════════════════════════
+
+$__current_dir = basename(dirname($_SERVER['SCRIPT_NAME']));
+
+if ($__current_dir === 'branch') {
+    // We're inside MyStock/branch/...
+    $root_path   = '../';           // → MyStock/            (profile.php, login.php, index.php)
+    $branch_path = '';              // → MyStock/branch/      (siblings, no prefix needed)
+    $admin_path  = '../admin/';     // → MyStock/admin/
+
+} elseif ($__current_dir === 'admin') {
+    // We're inside MyStock/admin/...
+    $root_path   = '../';           // → MyStock/
+    $branch_path = '../branch/';    // → MyStock/branch/
+    $admin_path  = '';              // → MyStock/admin/       (siblings, no prefix needed)
+
+} else {
+    // We're at the root: MyStock/profile.php, index.php, login.php...
+    $root_path   = '';              // → MyStock/             (siblings, no prefix needed)
+    $branch_path = 'branch/';       // → MyStock/branch/
+    $admin_path  = 'admin/';        // → MyStock/admin/
+}
+
 // ============================================
 // SESSION FUNCTIONS
 // ============================================
@@ -202,22 +231,27 @@ function generatePOMessage($po_number, $supplier_name, $items, $total) {
 // ============================================
 // REQUIRE FUNCTIONS
 // ============================================
+// NOTE: these now use $root_path so the redirect target is correct
+// whether the calling page lives in root/, branch/, or admin/.
 
 function requireLogin() {
+    global $root_path;
     if (!isLoggedIn()) {
-        redirect('login.php');
+        redirect($root_path . 'login.php');
     }
 }
 
 function requireBranchAccess() {
+    global $root_path;
     if (!getCurrentBranch()) {
-        redirect('../index.php');
+        redirect($root_path . 'index.php');
     }
 }
 
 function requireAdmin() {
+    global $root_path;
     if (!isAdmin()) {
-        redirect('index.php');
+        redirect($root_path . 'index.php');
     }
 }
 ?>

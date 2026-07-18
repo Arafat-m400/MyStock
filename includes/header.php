@@ -7,25 +7,25 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    
+
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
+
     <style>
         :root {
             --primary: #0d6efd;
             --primary-dark: #0a58ca;
             --primary-light: #e7f1ff;
         }
-        
+
         * { box-sizing: border-box; }
-        
+
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: #f0f2f5;
             overflow-x: hidden;
         }
-        
+
         .navbar-mystock {
             background: linear-gradient(135deg, #0a58ca 0%, #0d6efd 100%);
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
@@ -63,7 +63,7 @@
         .branch-badge i {
             margin-right: 5px;
         }
-        
+
         .sidebar {
             background: white;
             min-height: calc(100vh - 56px);
@@ -102,13 +102,13 @@
             font-weight: 600;
             letter-spacing: 0.5px;
         }
-        
+
         .main-content {
             padding: 20px;
             background: #f0f2f5;
             min-height: calc(100vh - 56px);
         }
-        
+
         .stat-card {
             background: white;
             border-radius: 12px;
@@ -131,7 +131,7 @@
             font-weight: 700;
             margin: 0;
         }
-        
+
         @media (max-width: 768px) {
             .sidebar {
                 min-height: auto;
@@ -150,7 +150,7 @@
                 font-size: 20px;
             }
         }
-        
+
         .table-container {
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
@@ -158,7 +158,7 @@
         .text-primary { color: #0d6efd !important; }
         .bg-primary { background: #0d6efd !important; }
         .cursor-pointer { cursor: pointer; }
-        
+
         .back-btn {
             display: inline-block;
         }
@@ -168,14 +168,14 @@
     <!-- Navbar -->
     <nav class="navbar navbar-mystock navbar-expand-lg">
         <div class="container-fluid">
-            <a class="navbar-brand" href="dashboard.php">
+            <a class="navbar-brand" href="<?php echo $branch_path; ?>dashboard.php">
                 <i class="fas fa-store-alt"></i> MyStock
             </a>
-            
+
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
             </button>
-            
+
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <?php if(getCurrentBranch()): ?>
@@ -191,26 +191,29 @@
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
                             <i class="fas fa-user-circle me-1"></i>
-                            <?php echo htmlspecialchars($_SESSION['full_name'] ?? 'User'); ?>
+                            <?php echo htmlspecialchars($_SESSION['full_name'] ?? $_SESSION['username'] ?? 'User'); ?>
                             <small class="d-none d-sm-inline">(<?php echo ucfirst($_SESSION['role'] ?? ''); ?>)</small>
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end">
-                            <li><a class="dropdown-item" href="../profile.php"><i class="fas fa-user me-2"></i>Profile</a></li>
-                            <li><a class="dropdown-item" href="../index.php"><i class="fas fa-store me-2"></i>Switch Branch</a></li>
+                            <!-- FIX: use $root_path / $admin_path so these links
+                                 work correctly no matter which folder (root,
+                                 branch/, admin/) the CURRENT page lives in -->
+                            <li><a class="dropdown-item" href="<?php echo $root_path; ?>profile.php"><i class="fas fa-user me-2"></i>Profile</a></li>
+                            <li><a class="dropdown-item" href="<?php echo $root_path; ?>index.php"><i class="fas fa-store me-2"></i>Switch Branch</a></li>
                             <?php if(isAdmin()): ?>
                             <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="../admin/branches.php"><i class="fas fa-building me-2"></i>Manage Branches</a></li>
-                            <li><a class="dropdown-item" href="../admin/users.php"><i class="fas fa-users-cog me-2"></i>Manage Users</a></li>
-                            <li><a class="dropdown-item" href="../admin/settings.php"><i class="fas fa-cog me-2"></i>Settings</a></li>
+                            <li><a class="dropdown-item" href="<?php echo $admin_path; ?>branches.php"><i class="fas fa-building me-2"></i>Manage Branches</a></li>
+                            <li><a class="dropdown-item" href="<?php echo $admin_path; ?>users.php"><i class="fas fa-users-cog me-2"></i>Manage Users</a></li>
+                            <li><a class="dropdown-item" href="<?php echo $admin_path; ?>settings.php"><i class="fas fa-cog me-2"></i>Settings</a></li>
                             <?php endif; ?>
                             <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item text-danger" href="../logout.php"><i class="fas fa-sign-out-alt me-2"></i>Logout</a></li>
+                            <li><a class="dropdown-item text-danger" href="<?php echo $root_path; ?>logout.php"><i class="fas fa-sign-out-alt me-2"></i>Logout</a></li>
                         </ul>
                     </li>
                 </ul>
             </div>
         </div>
     </nav>
-    
+
     <div class="container-fluid p-0">
         <div class="row g-0">

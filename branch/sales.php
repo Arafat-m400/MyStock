@@ -11,7 +11,7 @@ $message = '';
 // ============================================
 
 $products = $pdo->prepare("
-    SELECT id, name, sku, quantity, selling_price, unit 
+    SELECT id, name, sku, quantity, selling_price, cost_price, unit 
     FROM products 
     WHERE branch_id = ? 
     ORDER BY name
@@ -73,6 +73,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_sale'])) {
             }
             
             $unit_price = floatval($item['price'] ?? $product['selling_price']);
+
+            // FIX: never allow a sale price below cost price, even if the
+            // client-side check was somehow bypassed.
+            if ($unit_price < $product['cost_price']) {
+                throw new Exception("Premium Price for \"{$product['name']}\" (" . number_format($unit_price,0) . " RWF) cannot be below its cost price (" . number_format($product['cost_price'],0) . " RWF).");
+            }
+
             $item_subtotal = $item['quantity'] * $unit_price;
             $subtotal += $item_subtotal;
             
@@ -193,24 +200,23 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_sale'])) {
             'debt' => '📝 Debt'
         ][$payment_method] ?? $payment_method;
         
-        $message = '<div class="alert alert-success alert-permanent">
+        // FIX: alert-permanent removed so this now auto-dismisses like any
+        // other alert (footer.php skips alert-permanent elements). The
+        // invoice link + New Sale button were also dropped — every sale
+        // already shows up with its own invoice link in the Sales History
+        // table right below, so this was a duplicate that only mattered
+        // while the alert was still on screen.
+        $message = '<div class="alert alert-success">
             <i class="fas fa-check-circle me-2"></i>
             <strong>✅ Sale Completed!</strong>
             Invoice: <strong>' . $invoice_no . '</strong>
             <br><small>Total: ' . number_format($grand_total, 0) . ' RWF</small>
             <br><small>Payment: ' . $method_text . '</small>
             ' . ($payment_method == 'debt' ? '<br><span class="text-warning">⚠️ This is a debt sale</span>' : '') . '
-            <br>
-            <a href="view_invoice.php?id=' . $sale_id . '" target="_blank" class="btn btn-sm btn-success mt-2">
-                <i class="fas fa-print me-1"></i> View/Print Invoice
-            </a>
-            <button class="btn btn-sm btn-secondary mt-2" onclick="location.reload()">
-                <i class="fas fa-plus me-1"></i> New Sale
-            </button>
         </div>';
         
         // Refresh data
-        $products = $pdo->prepare("SELECT id, name, quantity, selling_price, unit FROM products WHERE branch_id = ? ORDER BY name");
+        $products = $pdo->prepare("SELECT id, name, quantity, selling_price, cost_price, unit FROM products WHERE branch_id = ? ORDER BY name");
         $products->execute([$branch_id]);
         $products = $products->fetchAll();
         
@@ -297,6 +303,7 @@ include '../includes/sidebar.php';
                                         <option value="<?php echo $p['id']; ?>" 
                                                 data-name="<?php echo htmlspecialchars($p['name']); ?>"
                                                 data-price="<?php echo $p['selling_price']; ?>"
+                                                data-cost="<?php echo $p['cost_price']; ?>"
                                                 data-stock="<?php echo $p['quantity']; ?>"
                                                 data-unit="<?php echo $p['unit']; ?>">
                                             <?php echo htmlspecialchars($p['name']); ?> - 
@@ -312,7 +319,7 @@ include '../includes/sidebar.php';
                                 </div>
                                 <div class="col-md-3">
                                     <input type="number" id="custom_price_input" class="form-control" 
-                                           placeholder="Custom price" step="100" min="0">
+                                           placeholder="Premium Price" step="100" min="0">
                                 </div>
                                 <div class="col-md-2">
                                     <button type="button" class="btn btn-secondary w-100" onclick="addItem()">
@@ -482,6 +489,7 @@ function onProductSelect(select) {
         id: option.value,
         name: option.dataset.name,
         price: parseFloat(option.dataset.price),
+        cost: parseFloat(option.dataset.cost),
         stock: parseInt(option.dataset.stock),
         unit: option.dataset.unit
     };
@@ -510,6 +518,15 @@ function addItem() {
     }
     
     const customPrice = parseFloat(document.getElementById('custom_price_input').value);
+
+    // FIX: Premium Price can never undercut cost price — that would be a
+    // guaranteed loss on the sale, not a premium.
+    if (!isNaN(customPrice) && customPrice > 0 && customPrice < selectedProduct.cost) {
+        alert('Premium Price (' + formatNumber(customPrice) + ' RWF) cannot be below the cost price ('
+              + formatNumber(selectedProduct.cost) + ' RWF) for "' + selectedProduct.name + '".');
+        return;
+    }
+
     const price = (!isNaN(customPrice) && customPrice > 0) ? customPrice : selectedProduct.price;
     
     const existing = cart.find(item => item.product_id === selectedProduct.id);

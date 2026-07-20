@@ -33,15 +33,6 @@
                 });
             }, 5000);
         });
-
-        // Prevent back button after logout
-        <?php if(!isLoggedIn()): ?>
-        window.addEventListener('pageshow', function(event) {
-            if (event.persisted) {
-                window.location.href = 'login.php';
-            }
-        });
-        <?php endif; ?>
     </script>
 </body>
 </html>

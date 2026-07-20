@@ -141,7 +141,8 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
     }
 }
 
-include 'includes/admin_header.php';
+include '../includes/header.php';
+include '../includes/sidebar.php';
 ?>
 <div class="col-md-10 main-content">
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">

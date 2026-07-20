@@ -13,7 +13,13 @@ $message = '';
 
 $today = date('Y-m-d');
 
-// Today's sales summary
+// FIX: was hardcoded to today only, so a missed day could never be
+// filed. Now accepts ?date=YYYY-MM-DD, capped so you can't file a
+// future day.
+$selected_date = $_GET['date'] ?? $today;
+if ($selected_date > $today) $selected_date = $today;
+
+// Sales summary for the selected date
 $sales_summary = $pdo->prepare("
     SELECT 
         COALESCE(SUM(grand_total), 0) as total_sales,
@@ -24,43 +30,88 @@ $sales_summary = $pdo->prepare("
     FROM sales 
     WHERE branch_id = ? AND sale_date = ?
 ");
-$sales_summary->execute([$branch_id, $today]);
+$sales_summary->execute([$branch_id, $selected_date]);
 $sales_summary = $sales_summary->fetch();
 
-// Today's expenses
+// Total expenses for the selected date (all payment methods - shown as-is)
 $expenses_total = $pdo->prepare("
     SELECT COALESCE(SUM(amount), 0) as total 
     FROM expenses 
     WHERE branch_id = ? AND expense_date = ?
 ");
-$expenses_total->execute([$branch_id, $today]);
+$expenses_total->execute([$branch_id, $selected_date]);
 $expenses_total = $expenses_total->fetchColumn();
 
-// Today's customer payments received
-$payments_received = $pdo->prepare("
+// FIX: only CASH expenses actually reduce the physical cash in the
+// drawer - previously nothing was subtracted from expected cash at all.
+$cash_expenses = $pdo->prepare("
+    SELECT COALESCE(SUM(amount), 0) as total
+    FROM expenses
+    WHERE branch_id = ? AND expense_date = ? AND payment_method = 'cash'
+");
+$cash_expenses->execute([$branch_id, $selected_date]);
+$cash_expenses = $cash_expenses->fetchColumn();
+
+// Customer payments received, split by method (only cash affects the drawer,
+// only momo affects the expected momo total)
+$payments_received_cash = $pdo->prepare("
     SELECT COALESCE(SUM(amount), 0) as total 
     FROM payments 
-    WHERE branch_id = ? AND payment_date = ? AND debt_type = 'customer'
+    WHERE branch_id = ? AND payment_date = ? AND debt_type = 'customer' AND payment_method = 'cash'
 ");
-$payments_received->execute([$branch_id, $today]);
-$payments_received = $payments_received->fetchColumn();
+$payments_received_cash->execute([$branch_id, $selected_date]);
+$payments_received_cash = $payments_received_cash->fetchColumn();
 
-// Today's supplier payments made
-$payments_made = $pdo->prepare("
+$payments_received_momo = $pdo->prepare("
     SELECT COALESCE(SUM(amount), 0) as total 
     FROM payments 
-    WHERE branch_id = ? AND payment_date = ? AND debt_type = 'supplier'
+    WHERE branch_id = ? AND payment_date = ? AND debt_type = 'customer' AND payment_method = 'mobile_money'
 ");
-$payments_made->execute([$branch_id, $today]);
-$payments_made = $payments_made->fetchColumn();
+$payments_received_momo->execute([$branch_id, $selected_date]);
+$payments_received_momo = $payments_received_momo->fetchColumn();
 
-// Check if end of day already recorded
+// FIX: supplier debt payments made in CASH also leave the drawer -
+// previously fetched but never actually subtracted from expected cash.
+$payments_made_cash = $pdo->prepare("
+    SELECT COALESCE(SUM(amount), 0) as total 
+    FROM payments 
+    WHERE branch_id = ? AND payment_date = ? AND debt_type = 'supplier' AND payment_method = 'cash'
+");
+$payments_made_cash->execute([$branch_id, $selected_date]);
+$payments_made_cash = $payments_made_cash->fetchColumn();
+
+// FIX: cash advances given to suppliers/collectors that day (and any
+// same-day top-ups) also leave the drawer, and were never accounted for
+// at all - this alone caused false "shortage" alerts on advance days.
+$advances_given = $pdo->prepare("
+    SELECT COALESCE(SUM(advance_amount), 0) as total
+    FROM purchase_orders
+    WHERE branch_id = ? AND po_type = 'advance' AND order_date = ? AND status != 'cancelled'
+");
+$advances_given->execute([$branch_id, $selected_date]);
+$advances_given = $advances_given->fetchColumn();
+
+$topups_given = $pdo->prepare("
+    SELECT COALESCE(SUM(t.amount), 0) as total
+    FROM po_topups t
+    JOIN purchase_orders po ON t.po_id = po.id
+    WHERE po.branch_id = ? AND DATE(t.created_at) = ?
+");
+$topups_given->execute([$branch_id, $selected_date]);
+$topups_given = $topups_given->fetchColumn();
+
+$cash_advances_given = $advances_given + $topups_given;
+
+// Check if end of day already recorded for the selected date
 $existing_eod = $pdo->prepare("
     SELECT * FROM end_of_day 
     WHERE branch_id = ? AND report_date = ?
 ");
-$existing_eod->execute([$branch_id, $today]);
+$existing_eod->execute([$branch_id, $selected_date]);
 $existing_eod = $existing_eod->fetch();
+
+// Admin can re-open an already-recorded day to correct a mistake
+$edit_mode = $is_admin && isset($_GET['edit']) && $existing_eod;
 
 // ============================================
 // SAVE END OF DAY
@@ -71,68 +122,91 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['save_eod'])) {
     $actual_momo = floatval($_POST['actual_momo'] ?? 0);
     $notes = sanitize($_POST['notes']);
     $stock_discrepancies = sanitize($_POST['stock_discrepancies'] ?? '');
-    
-    // Calculate expected vs actual
-    $expected_cash = $sales_summary['total_cash'] + $payments_received;
-    $expected_momo = $sales_summary['total_momo'];
+    $save_date = $_POST['report_date'] ?? $selected_date;
+    $is_edit_save = $is_admin && isset($_POST['is_edit']) && $_POST['is_edit'] == '1';
+
+    // FIX: expected cash now accounts for everything that actually moves
+    // cash in or out of the drawer that day - previously only sales-cash
+    // and customer payments were added, and nothing was ever subtracted.
+    $expected_cash = $sales_summary['total_cash']
+                   + $payments_received_cash
+                   - $cash_expenses
+                   - $payments_made_cash
+                   - $cash_advances_given;
+    $expected_momo = $sales_summary['total_momo'] + $payments_received_momo;
     
     $cash_diff = $actual_cash - $expected_cash;
     $momo_diff = $actual_momo - $expected_momo;
     
-    // Determine status
     $status = 'confirmed';
     if (abs($cash_diff) > 1000 || abs($momo_diff) > 1000) {
         $status = 'alert';
     }
     
     try {
-        // Prepare stock discrepancies if any
         $discrepancies = [];
         if (!empty($stock_discrepancies)) {
             $discrepancies = json_decode($stock_discrepancies, true) ?? [];
         }
+
+        if ($is_edit_save) {
+            // Admin correcting an existing record - UPDATE, don't duplicate
+            $stmt = $pdo->prepare("
+                UPDATE end_of_day SET
+                    expected_cash=?, actual_cash=?, expected_momo=?, actual_momo=?,
+                    total_expenses=?, total_sales=?, stock_discrepancies=?, notes=?, status=?
+                WHERE branch_id=? AND report_date=?
+            ");
+            $stmt->execute([
+                $expected_cash, $actual_cash, $expected_momo, $actual_momo,
+                $expenses_total, $sales_summary['total_sales'],
+                json_encode($discrepancies), $notes, $status,
+                $branch_id, $save_date
+            ]);
+            logAction($pdo, 'End of Day Edited', "EOD for $save_date corrected by admin (Status: $status)");
+        } else {
+            $stmt = $pdo->prepare("
+                INSERT INTO end_of_day (
+                    branch_id, report_date,
+                    expected_cash, actual_cash,
+                    expected_momo, actual_momo,
+                    total_expenses, total_sales,
+                    stock_discrepancies, notes, status, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                $branch_id,
+                $save_date,
+                $expected_cash,
+                $actual_cash,
+                $expected_momo,
+                $actual_momo,
+                $expenses_total,
+                $sales_summary['total_sales'],
+                json_encode($discrepancies),
+                $notes,
+                $status,
+                $_SESSION['user_id']
+            ]);
+            logAction($pdo, 'End of Day', "EOD recorded for $save_date (Status: $status)");
+        }
         
-        $stmt = $pdo->prepare("
-            INSERT INTO end_of_day (
-                branch_id, report_date,
-                expected_cash, actual_cash,
-                expected_momo, actual_momo,
-                total_expenses, total_sales,
-                stock_discrepancies, notes, status, created_by
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ");
-        $stmt->execute([
-            $branch_id,
-            $today,
-            $expected_cash,
-            $actual_cash,
-            $expected_momo,
-            $actual_momo,
-            $expenses_total,
-            $sales_summary['total_sales'],
-            json_encode($discrepancies),
-            $notes,
-            $status,
-            $_SESSION['user_id']
-        ]);
-        
-        logAction($pdo, 'End of Day', "EOD recorded for $today (Status: $status)");
-        
-        $message = '<div class="alert alert-success alert-permanent">
+        $message = '<div class="alert alert-success">
             <i class="fas fa-check-circle me-2"></i>
-            <strong>✅ End of Day Recorded!</strong>
-            <br>Date: ' . $today . '
+            <strong>✅ End of Day ' . ($is_edit_save ? 'Updated' : 'Recorded') . '!</strong>
+            <br>Date: ' . $save_date . '
             <br>Status: <span class="badge bg-' . ($status == 'alert' ? 'danger' : 'success') . '">' . strtoupper($status) . '</span>
             ' . ($status == 'alert' ? '<br><span class="text-danger">⚠️ Discrepancy detected! Please check your cash/MOMO counts.</span>' : '') . '
         </div>';
         
-        // Refresh EOD data
         $existing_eod = $pdo->prepare("
             SELECT * FROM end_of_day 
             WHERE branch_id = ? AND report_date = ?
         ");
-        $existing_eod->execute([$branch_id, $today]);
+        $existing_eod->execute([$branch_id, $save_date]);
         $existing_eod = $existing_eod->fetch();
+        $selected_date = $save_date;
+        $edit_mode = false;
         
     } catch (PDOException $e) {
         $message = '<div class="alert alert-danger">❌ Error: ' . $e->getMessage() . '</div>';
@@ -162,14 +236,24 @@ include '../includes/sidebar.php';
     <div>
         <h2><i class="fas fa-calendar-check me-2 text-primary"></i>End of Day</h2>
         <p class="text-muted">
-            <?php echo date('l, F j, Y'); ?> 
+            <?php echo date('l, F j, Y', strtotime($selected_date)); ?> 
             <span class="mx-2">|</span>
             <?php echo htmlspecialchars(getCurrentBranchName()); ?> Branch
+            <?php if($selected_date !== $today): ?>
+            <span class="badge bg-secondary ms-2">Viewing a past day</span>
+            <?php endif; ?>
         </p>
     </div>
-    <div>
-        <span class="badge bg-<?php echo $existing_eod ? 'success' : 'warning'; ?> fs-6">
-            <?php echo $existing_eod ? '✅ Recorded' : '⏳ Pending'; ?>
+    <div class="d-flex align-items-center gap-2">
+        <!-- FIX: date picker added - previously $today was hardcoded so a
+             missed day could never be filed after the fact. -->
+        <form method="GET" class="d-flex gap-2">
+            <input type="date" name="date" class="form-control form-control-sm"
+                   value="<?php echo $selected_date; ?>" max="<?php echo $today; ?>"
+                   onchange="this.form.submit()">
+        </form>
+        <span class="badge bg-<?php echo $existing_eod ? ($existing_eod['status']=='alert' ? 'danger' : 'success') : 'warning'; ?> fs-6">
+            <?php echo $existing_eod ? ($existing_eod['status']=='alert' ? '⚠️ Alert' : '✅ Recorded') : '⏳ Pending'; ?>
         </span>
     </div>
 </div>
@@ -190,8 +274,8 @@ TODAY'S SUMMARY
     <div class="col-md-3 col-6">
         <div class="stat-card text-center">
             <p class="stat-label">Cash Received</p>
-            <h4 class="text-primary"><?php echo number_format($sales_summary['total_cash'] + $payments_received, 0); ?></h4>
-            <small>Sales: <?php echo number_format($sales_summary['total_cash'], 0); ?> + Payments: <?php echo number_format($payments_received, 0); ?></small>
+            <h4 class="text-primary"><?php echo number_format($sales_summary['total_cash'] + $payments_received_cash, 0); ?></h4>
+            <small>Sales: <?php echo number_format($sales_summary['total_cash'], 0); ?> + Payments: <?php echo number_format($payments_received_cash, 0); ?></small>
         </div>
     </div>
     <div class="col-md-3 col-6">
@@ -213,38 +297,55 @@ TODAY'S SUMMARY
 <!-- ============================================
 EOD FORM
 ============================================ -->
-<?php if(!$existing_eod): ?>
+<?php if(!$existing_eod || $edit_mode): ?>
 <div class="card shadow-sm mb-4">
     <div class="card-header bg-primary text-white">
-        <h5 class="mb-0"><i class="fas fa-clipboard-check me-2"></i>End of Day Report</h5>
+        <h5 class="mb-0"><i class="fas fa-clipboard-check me-2"></i>
+            <?php echo $edit_mode ? 'Correcting End of Day — ' . $selected_date : 'End of Day Report'; ?>
+        </h5>
     </div>
     <div class="card-body">
+        <?php
+        $calc_expected_cash = $sales_summary['total_cash'] + $payments_received_cash
+                            - $cash_expenses - $payments_made_cash - $cash_advances_given;
+        $calc_expected_momo = $sales_summary['total_momo'] + $payments_received_momo;
+        $prefill_cash = $edit_mode ? $existing_eod['actual_cash'] : $calc_expected_cash;
+        $prefill_momo = $edit_mode ? $existing_eod['actual_momo'] : $calc_expected_momo;
+        ?>
         <form method="POST">
+            <input type="hidden" name="report_date" value="<?php echo $selected_date; ?>">
+            <?php if($edit_mode): ?><input type="hidden" name="is_edit" value="1"><?php endif; ?>
             <div class="row">
                 <div class="col-md-6">
                     <div class="alert alert-info">
-                        <strong>Expected Cash:</strong> <?php echo number_format($sales_summary['total_cash'] + $payments_received, 0); ?> RWF
+                        <strong>Expected Cash:</strong> <?php echo number_format($calc_expected_cash, 0); ?> RWF
                         <br>
-                        <small>Sales cash + Customer payments</small>
+                        <small>
+                            Sales cash (<?php echo number_format($sales_summary['total_cash'],0); ?>)
+                            + customer cash payments (<?php echo number_format($payments_received_cash,0); ?>)
+                            − cash expenses (<?php echo number_format($cash_expenses,0); ?>)
+                            − supplier cash payments (<?php echo number_format($payments_made_cash,0); ?>)
+                            − advances/top-ups given (<?php echo number_format($cash_advances_given,0); ?>)
+                        </small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Actual Cash Count (RWF) *</label>
-                        <input type="number" name="actual_cash" class="form-control" required min="0" step="100" 
+                        <input type="number" name="actual_cash" class="form-control" required min="0" step="any" 
                                placeholder="Count actual cash in drawer"
-                               value="<?php echo $sales_summary['total_cash'] + $payments_received; ?>">
+                               value="<?php echo $prefill_cash; ?>">
                     </div>
                 </div>
                 <div class="col-md-6">
                     <div class="alert alert-info">
-                        <strong>Expected Mobile Money:</strong> <?php echo number_format($sales_summary['total_momo'], 0); ?> RWF
+                        <strong>Expected Mobile Money:</strong> <?php echo number_format($calc_expected_momo, 0); ?> RWF
                         <br>
-                        <small>MOMO from sales</small>
+                        <small>MOMO from sales + customer MOMO payments</small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Actual Mobile Money (RWF) *</label>
-                        <input type="number" name="actual_momo" class="form-control" required min="0" step="100" 
+                        <input type="number" name="actual_momo" class="form-control" required min="0" step="any" 
                                placeholder="Count actual MOMO received"
-                               value="<?php echo $sales_summary['total_momo']; ?>">
+                               value="<?php echo $prefill_momo; ?>">
                     </div>
                 </div>
             </div>
@@ -252,27 +353,37 @@ EOD FORM
             <div class="mb-3">
                 <label class="form-label">Stock Discrepancies (if any)</label>
                 <textarea name="stock_discrepancies" class="form-control" rows="2" 
-                          placeholder="e.g., Missing 5 bags of cement, 2 boxes of nails..."></textarea>
+                          placeholder="e.g., Missing 5 bags of cement, 2 boxes of nails..."><?php echo $edit_mode ? htmlspecialchars(is_array(json_decode($existing_eod['stock_discrepancies'],true)) ? implode(', ', json_decode($existing_eod['stock_discrepancies'],true)) : $existing_eod['stock_discrepancies']) : ''; ?></textarea>
             </div>
             
             <div class="mb-3">
                 <label class="form-label">Notes</label>
                 <textarea name="notes" class="form-control" rows="2" 
-                          placeholder="Any issues, incidents, or notes for today..."></textarea>
+                          placeholder="Any issues, incidents, or notes for today..."><?php echo $edit_mode ? htmlspecialchars($existing_eod['notes']) : ''; ?></textarea>
             </div>
             
             <button type="submit" name="save_eod" class="btn btn-success btn-lg w-100" 
-                    onclick="return confirm('Confirm End of Day report? This will lock today\'s data.')">
-                <i class="fas fa-save me-2"></i> Save End of Day
+                    onclick="return confirm('<?php echo $edit_mode ? "Save corrections to this End of Day report?" : "Confirm End of Day report? This will lock this day\'s data."; ?>')">
+                <i class="fas fa-save me-2"></i> <?php echo $edit_mode ? 'Save Corrections' : 'Save End of Day'; ?>
             </button>
+            <?php if($edit_mode): ?>
+            <a href="end_of_day.php?date=<?php echo $selected_date; ?>" class="btn btn-outline-secondary w-100 mt-2">Cancel Edit</a>
+            <?php endif; ?>
         </form>
     </div>
 </div>
 <?php else: ?>
 <!-- Already recorded -->
 <div class="card shadow-sm mb-4">
-    <div class="card-header bg-success text-white">
+    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
         <h5 class="mb-0"><i class="fas fa-check-circle me-2"></i>End of Day Already Recorded</h5>
+        <?php if($is_admin): ?>
+        <!-- FIX: previously no way to correct a mistyped actual-cash
+             figure once saved, short of editing the database directly. -->
+        <a href="?date=<?php echo $selected_date; ?>&edit=1" class="btn btn-sm btn-light">
+            <i class="fas fa-edit me-1"></i> Correct This Entry
+        </a>
+        <?php endif; ?>
     </div>
     <div class="card-body">
         <div class="row">

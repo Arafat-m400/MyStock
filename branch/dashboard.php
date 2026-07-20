@@ -51,8 +51,40 @@ $stmt = $pdo->prepare("
 $stmt->execute([$branch_id]);
 $today_expenses = $stmt->fetchColumn();
 
-// 6. Today's Net Profit
-$today_net = $today_sales['total_sales'] - $today_expenses;
+// 6. Today's REAL profit (revenue - cost of goods sold - expenses)
+// FIX: previously "Today's Net Profit" was just sales minus expenses,
+// which ignores cost of goods sold entirely — not actual profit.
+$stmt = $pdo->prepare("
+    SELECT COALESCE(SUM(si.quantity * si.cost_price_at_sale), 0) as total_cogs
+    FROM sale_items si
+    JOIN sales s ON si.sale_id = s.id
+    WHERE s.branch_id = ? AND s.sale_date = CURDATE()
+");
+$stmt->execute([$branch_id]);
+$today_cogs = $stmt->fetchColumn();
+$today_gross_profit = $today_sales['total_sales'] - $today_cogs;
+$today_net = $today_gross_profit - $today_expenses;
+
+// 6b. This month's REAL profit (same COGS-based logic, for the Monthly card)
+$stmt = $pdo->prepare("
+    SELECT COALESCE(SUM(si.quantity * si.cost_price_at_sale), 0) as total_cogs
+    FROM sale_items si
+    JOIN sales s ON si.sale_id = s.id
+    WHERE s.branch_id = ? AND MONTH(s.sale_date) = MONTH(CURDATE()) AND YEAR(s.sale_date) = YEAR(CURDATE())
+");
+$stmt->execute([$branch_id]);
+$month_cogs = $stmt->fetchColumn();
+
+$stmt = $pdo->prepare("
+    SELECT COALESCE(SUM(amount), 0) as total
+    FROM expenses
+    WHERE branch_id = ? AND MONTH(expense_date) = MONTH(CURDATE()) AND YEAR(expense_date) = YEAR(CURDATE())
+");
+$stmt->execute([$branch_id]);
+$month_expenses = $stmt->fetchColumn();
+
+$month_gross_profit = $month_sales - $month_cogs;
+$month_net_profit   = $month_gross_profit - $month_expenses;
 
 // 7. Stock Value
 $stmt = $pdo->prepare("
@@ -205,7 +237,7 @@ MAIN CONTENT - col-md-10
                             <h3 class="stat-value mb-0 text-<?php echo $today_net >= 0 ? 'primary' : 'danger'; ?>">
                                 <?php echo number_format($today_net, 0); ?>
                             </h3>
-                            <small class="text-muted">Expenses: <?php echo number_format($today_expenses, 0); ?></small>
+                            <small class="text-muted">After cost of goods (<?php echo number_format($today_cogs, 0); ?>) &amp; expenses (<?php echo number_format($today_expenses, 0); ?>)</small>
                         </div>
                         <div class="stat-icon bg-primary bg-opacity-10 text-primary rounded-3 p-3">
                             <i class="fas fa-chart-line fs-4"></i>
@@ -220,15 +252,20 @@ MAIN CONTENT - col-md-10
     STATS CARDS - Second Row
     ============================================ -->
     <div class="row g-3 mb-4">
-        <!-- Monthly Sales -->
+        <!-- Monthly Sales & Profit combined -->
+        <!-- FIX: was "Monthly Sales" only (pure revenue); now shows both
+             revenue and real COGS-based profit in one card instead of
+             adding yet another card to an already crowded dashboard. -->
         <div class="col-6 col-md-3">
             <div class="card stat-card shadow-sm h-100">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
-                            <p class="stat-label text-muted mb-1">Monthly Sales</p>
+                            <p class="stat-label text-muted mb-1">Monthly Sales / Profit</p>
                             <h4 class="stat-value mb-0"><?php echo number_format($month_sales, 0); ?></h4>
-                            <small class="text-muted">This month</small>
+                            <small class="text-<?php echo $month_net_profit >= 0 ? 'success' : 'danger'; ?>">
+                                Profit: <?php echo number_format($month_net_profit, 0); ?>
+                            </small>
                         </div>
                         <div class="stat-icon bg-info bg-opacity-10 text-info rounded-3 p-3">
                             <i class="fas fa-calendar-alt fs-4"></i>

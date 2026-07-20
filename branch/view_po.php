@@ -64,12 +64,27 @@ include '../includes/sidebar.php';
             <i class="fas fa-print me-1"></i> Print
         </button>
         <?php if($po['status'] != 'completed' && $po['status'] != 'cancelled'): ?>
-        <a href="purchase_orders.php?receive=<?php echo $po['id']; ?>" class="btn btn-success">
-            <i class="fas fa-box me-1"></i> Receive Items
-        </a>
+            <?php if($po['po_type'] === 'advance'): ?>
+            <!-- FIX: advances route to ?deliver=, not ?receive= — the old
+                 link went nowhere for advance-type POs because that
+                 endpoint only ever built a modal for formal orders. -->
+            <a href="purchase_orders.php?deliver=<?php echo $po['id']; ?>" class="btn btn-success">
+                <i class="fas fa-box me-1"></i> Record Delivery
+            </a>
+            <a href="purchase_orders.php?topup=<?php echo $po['id']; ?>" class="btn btn-outline-success">
+                <i class="fas fa-plus me-1"></i> Top Up
+            </a>
+            <?php else: ?>
+            <a href="purchase_orders.php?receive=<?php echo $po['id']; ?>" class="btn btn-success">
+                <i class="fas fa-box me-1"></i> Receive Items
+            </a>
+            <?php endif; ?>
         <?php endif; ?>
-        <?php if($po['supplier_whatsapp']): ?>
-        <a href="https://wa.me/<?php echo preg_replace('/[^0-9]/', '', $po['supplier_whatsapp']); ?>?text=<?php echo urlencode("PO: {$po['po_number']}\nSupplier: {$po['supplier_name']}\nTotal: " . number_format($po['total_amount'], 0) . " RWF\n\nPlease confirm receipt."); ?>" 
+        <?php if($po['supplier_whatsapp']):
+            $wa_total = $po['po_type'] === 'advance' ? $po['advance_amount'] : $po['total_amount'];
+            $wa_label = $po['po_type'] === 'advance' ? 'Advance Given' : 'Total';
+        ?>
+        <a href="https://wa.me/<?php echo preg_replace('/[^0-9]/', '', $po['supplier_whatsapp']); ?>?text=<?php echo urlencode("PO: {$po['po_number']}\nSupplier: {$po['supplier_name']}\n$wa_label: " . number_format($wa_total, 0) . " RWF\n\nPlease confirm receipt."); ?>" 
            target="_blank" class="btn btn-success">
             <i class="fab fa-whatsapp me-1"></i> Send WhatsApp
         </a>
@@ -163,10 +178,41 @@ include '../includes/sidebar.php';
     </div>
 </div>
 
+<?php if($po['po_type'] === 'advance'): ?>
+<!-- Advance Summary — this PO is a cash advance, not a fixed product order -->
+<div class="card shadow-sm mb-4 border-success">
+    <div class="card-header bg-success text-white">
+        <h5 class="mb-0"><i class="fas fa-hand-holding-usd me-2"></i>Cash Advance Summary</h5>
+    </div>
+    <div class="card-body">
+        <div class="row text-center">
+            <div class="col-md-4">
+                <p class="stat-label mb-1">Advance Given</p>
+                <h4 class="text-primary"><?php echo number_format($po['advance_amount'], 0); ?> RWF</h4>
+            </div>
+            <div class="col-md-4">
+                <p class="stat-label mb-1">Goods Value Received So Far</p>
+                <h4 class="text-info"><?php echo number_format($po['total_amount'], 0); ?> RWF</h4>
+            </div>
+            <div class="col-md-4">
+                <p class="stat-label mb-1">Balance</p>
+                <?php if($po['balance_direction'] === 'settled'): ?>
+                <h4 class="text-success">Settled</h4>
+                <?php elseif($po['balance_direction'] === 'supplier_owes'): ?>
+                <h4 class="text-danger">They owe <?php echo number_format($po['balance'], 0); ?> RWF</h4>
+                <?php else: ?>
+                <h4 class="text-warning">We owe <?php echo number_format(abs($po['balance']), 0); ?> RWF</h4>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- PO Items Table -->
 <div class="card shadow-sm">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <h5 class="mb-0"><i class="fas fa-list me-2"></i>Items Ordered</h5>
+        <h5 class="mb-0"><i class="fas fa-list me-2"></i><?php echo $po['po_type'] === 'advance' ? 'Goods Received' : 'Items Ordered'; ?></h5>
         <span class="badge bg-secondary"><?php echo count($items); ?> items</span>
     </div>
     <div class="card-body p-0">

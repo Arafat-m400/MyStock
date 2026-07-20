@@ -58,12 +58,43 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['save_product'])) {
 }
 
 // Delete Product
+// FIX: previously this ran a raw DELETE with no check and no try/catch.
+// sale_items, purchase_items, and purchase_order_items all have a foreign
+// key on product_id with no ON DELETE rule, so deleting any product that
+// has ever been sold or purchased threw an uncaught PDOException — an
+// ugly raw SQL crash screen instead of a friendly message.
 if (isset($_GET['delete']) && is_numeric($_GET['delete']) && $is_admin) {
     $id = $_GET['delete'];
-    $stmt = $pdo->prepare("DELETE FROM products WHERE id = ? AND branch_id = ?");
-    $stmt->execute([$id, $branch_id]);
-    $message = '<div class="alert alert-success">✅ Product deleted!</div>';
-    logAction($pdo, 'Delete Product', "Deleted product ID: $id");
+
+    $sale_check = $pdo->prepare("SELECT COUNT(*) FROM sale_items WHERE product_id = ?");
+    $sale_check->execute([$id]);
+    $sale_count = $sale_check->fetchColumn();
+
+    $purchase_check = $pdo->prepare("SELECT COUNT(*) FROM purchase_items WHERE product_id = ?");
+    $purchase_check->execute([$id]);
+    $purchase_count = $purchase_check->fetchColumn();
+
+    $po_check = $pdo->prepare("SELECT COUNT(*) FROM purchase_order_items WHERE product_id = ?");
+    $po_check->execute([$id]);
+    $po_item_count = $po_check->fetchColumn();
+
+    if ($sale_count > 0 || $purchase_count > 0 || $po_item_count > 0) {
+        $parts = [];
+        if ($sale_count > 0)     $parts[] = "$sale_count sale record(s)";
+        if ($purchase_count > 0) $parts[] = "$purchase_count purchase record(s)";
+        if ($po_item_count > 0)  $parts[] = "$po_item_count purchase order item(s)";
+        $message = '<div class="alert alert-warning">⚠️ Cannot delete: this product has ' . implode(' and ', $parts) . '. '
+                 . 'Consider marking it Inactive instead of deleting it, so your sales/purchase history stays intact.</div>';
+    } else {
+        try {
+            $stmt = $pdo->prepare("DELETE FROM products WHERE id = ? AND branch_id = ?");
+            $stmt->execute([$id, $branch_id]);
+            $message = '<div class="alert alert-success">✅ Product deleted!</div>';
+            logAction($pdo, 'Delete Product', "Deleted product ID: $id");
+        } catch (PDOException $e) {
+            $message = '<div class="alert alert-danger">❌ Could not delete this product — it may still be referenced elsewhere in the system.</div>';
+        }
+    }
 }
 
 // ============================================

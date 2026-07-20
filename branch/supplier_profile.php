@@ -35,8 +35,8 @@ foreach ($pos as $po) {
     } else {
         $total_advanced += $po['advance_amount'];
         $total_goods_value += $po['total_amount']; // goods value received against advance
-        if ($po['balance_direction'] === 'supplier_owes_us') $outstanding_receivable += $po['balance'];
-        if ($po['balance_direction'] === 'we_owe_supplier')  $outstanding_payable += $po['balance'];
+        if ($po['balance_direction'] === 'supplier_owes') $outstanding_receivable += $po['balance'];
+        if ($po['balance_direction'] === 'we_owe')         $outstanding_payable += abs($po['balance']);
     }
 }
 
@@ -221,9 +221,9 @@ include '../includes/sidebar.php';
                     <td><?php echo $po['order_date']; ?></td>
                     <td><?php echo number_format($is_advance ? $po['advance_amount'] : $po['total_amount'], 0); ?></td>
                     <td>
-                        <?php if($is_advance && $po['balance'] > 0): ?>
-                            <?php echo $po['balance_direction']==='supplier_owes_us' ? 'They owe: ' : 'We owe: '; ?>
-                            <?php echo number_format($po['balance'],0); ?>
+                        <?php if($is_advance && $po['balance_direction'] !== 'settled'): ?>
+                            <?php echo $po['balance_direction']==='supplier_owes' ? 'They owe: ' : 'We owe: '; ?>
+                            <?php echo number_format(abs($po['balance']),0); ?>
                         <?php else: ?>—<?php endif; ?>
                     </td>
                     <td><span class="badge bg-<?php echo $status_class; ?>"><?php echo strtoupper($po['status']); ?></span></td>

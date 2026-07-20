@@ -376,19 +376,34 @@ if (isset($_GET['receive']) && is_numeric($_GET['receive'])) {
             ");
             $items->execute([$po_id]);
         } else {
-            // Advance: show all products (can receive any product)
-            $items = $pdo->prepare("
-                SELECT p.id as product_id, p.name as product_name, p.unit,
-                       0 as quantity_ordered, 0 as quantity_received,
-                       p.cost_price as unit_price
-                FROM products p
-                WHERE p.branch_id = ?
-                ORDER BY p.name
-            ");
-            $items->execute([$branch_id]);
+            // FIX: previously dumped every single product in the branch
+            // into this list (all showing 0/0), which is what made the
+            // advance "Receive" form look like a giant empty checklist.
+            // The modal now uses a proper add-product cart instead (like
+            // the Formal Order create form), so nothing needs prefetching
+            // here - $products is already loaded at the top of the page.
+            $items = null;
         }
-        $po_items_to_receive = $items->fetchAll();
+        $po_items_to_receive = $items ? $items->fetchAll() : [];
     }
+}
+
+// ============================================
+// GET PO FOR TOP-UP
+// ============================================
+// FIX: this fetch never existed before. The "Top-up" button linked to
+// ?topup=<id> but nothing on the page ever read that parameter, so
+// clicking it visibly did nothing at all.
+$po_to_topup = null;
+if (isset($_GET['topup']) && is_numeric($_GET['topup'])) {
+    $stmt = $pdo->prepare("
+        SELECT po.*, s.name as supplier_name
+        FROM purchase_orders po
+        JOIN suppliers s ON po.supplier_id = s.id
+        WHERE po.id = ? AND po.branch_id = ? AND po.po_type = 'advance'
+    ");
+    $stmt->execute([$_GET['topup'], $branch_id]);
+    $po_to_topup = $stmt->fetch();
 }
 
 include '../includes/header.php';
@@ -638,6 +653,172 @@ include '../includes/sidebar.php';
         </div>
     </div>
     <?php endif; ?>
+
+    <!-- ============================================
+    RECEIVE MODAL — FIX: this modal never existed before.
+    The ?receive= link correctly fetched $po_to_receive in PHP, but
+    nothing ever rendered it, so clicking "Receive" visibly did nothing
+    for formal orders, and the old advance version (further below,
+    now removed) dumped every product in the catalog into a static list.
+    ============================================ -->
+    <?php if($po_to_receive): ?>
+    <div class="modal show d-block" tabindex="-1" style="background: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title">
+                        <i class="fas fa-box me-2"></i>
+                        Receive Items — <?php echo htmlspecialchars($po_to_receive['po_number']); ?>
+                    </h5>
+                    <a href="purchase_orders.php?tab=list" class="btn-close btn-close-white"></a>
+                </div>
+
+                <?php if($po_to_receive['po_type'] == 'formal'): ?>
+                <!-- FORMAL: receive against the pre-ordered item list -->
+                <form method="POST">
+                    <div class="modal-body">
+                        <p><strong>Supplier:</strong> <?php echo htmlspecialchars($po_to_receive['supplier_name']); ?></p>
+                        <input type="hidden" name="po_id" value="<?php echo $po_to_receive['id']; ?>">
+                        <input type="hidden" name="received_json" id="received_json">
+                        <div class="table-container">
+                            <table class="table table-bordered">
+                                <thead class="table-light">
+                                    <tr><th>Product</th><th>Ordered</th><th>Received</th><th>To Receive</th><th>Unit Price</th></tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach($po_items_to_receive as $item):
+                                        $remaining = $item['quantity_ordered'] - $item['quantity_received'];
+                                        if($remaining <= 0) continue;
+                                    ?>
+                                    <tr>
+                                        <td><?php echo htmlspecialchars($item['product_name']); ?></td>
+                                        <td><?php echo $item['quantity_ordered']; ?></td>
+                                        <td><?php echo $item['quantity_received']; ?></td>
+                                        <td>
+                                            <input type="number" class="form-control receive-qty"
+                                                   data-item-id="<?php echo $item['id']; ?>"
+                                                   data-product-id="<?php echo $item['product_id']; ?>"
+                                                   data-ordered="<?php echo $item['quantity_ordered']; ?>"
+                                                   data-price="<?php echo $item['unit_price']; ?>"
+                                                   min="0" max="<?php echo $remaining; ?>"
+                                                   value="<?php echo $remaining; ?>" style="width:100px;">
+                                        </td>
+                                        <td><?php echo number_format($item['unit_price'], 0); ?> RWF</td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <a href="purchase_orders.php?tab=list" class="btn btn-secondary">Cancel</a>
+                        <button type="submit" name="receive_items" class="btn btn-success" onclick="return prepareFormalReceiveSubmit()">
+                            <i class="fas fa-check me-1"></i> Confirm Receipt & Update Stock
+                        </button>
+                    </div>
+                </form>
+
+                <?php else: ?>
+                <!-- ADVANCE: build a fresh cart of whatever actually came back,
+                     same add-product UX as the Formal create form -->
+                <form method="POST" onsubmit="return prepareAdvanceReceiveSubmit()">
+                    <div class="modal-body">
+                        <p><strong>Supplier:</strong> <?php echo htmlspecialchars($po_to_receive['supplier_name']); ?></p>
+                        <p><strong>Advance Given:</strong> <?php echo number_format($po_to_receive['advance_amount'], 0); ?> RWF</p>
+                        <input type="hidden" name="po_id" value="<?php echo $po_to_receive['id']; ?>">
+                        <input type="hidden" name="received_json" id="advance_received_json">
+
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-5">
+                                <select id="deliver_product_select" class="form-select">
+                                    <option value="">-- Select Product --</option>
+                                    <?php foreach($products as $p): ?>
+                                    <option value="<?php echo $p['id']; ?>"
+                                            data-name="<?php echo htmlspecialchars($p['name']); ?>"
+                                            data-cost="<?php echo $p['cost_price']; ?>">
+                                        <?php echo htmlspecialchars($p['name']); ?>
+                                    </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <input type="number" id="deliver_qty" class="form-control" placeholder="Qty" min="1">
+                            </div>
+                            <div class="col-md-3">
+                                <input type="number" id="deliver_price" class="form-control" placeholder="Unit Value" step="100" min="0">
+                            </div>
+                            <div class="col-md-1">
+                                <button type="button" class="btn btn-secondary w-100" onclick="addDeliveryItem()"><i class="fas fa-plus"></i></button>
+                            </div>
+                        </div>
+
+                        <table class="table table-bordered table-sm">
+                            <thead class="table-light">
+                                <tr><th>Product</th><th>Qty</th><th>Unit Value</th><th>Subtotal</th><th></th></tr>
+                            </thead>
+                            <tbody id="delivery_cart_body">
+                                <tr id="delivery_empty_row"><td colspan="5" class="text-center text-muted py-2">No items added yet — add whatever they actually brought back</td></tr>
+                            </tbody>
+                            <tfoot>
+                                <tr class="table-success">
+                                    <th colspan="3" class="text-end">Total value brought back:</th>
+                                    <th id="delivery_total_display">0 RWF</th><th></th>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                    <div class="modal-footer">
+                        <a href="purchase_orders.php?tab=list" class="btn btn-secondary">Cancel</a>
+                        <button type="submit" name="receive_items" class="btn btn-success">
+                            <i class="fas fa-check me-1"></i> Confirm & Update Stock
+                        </button>
+                    </div>
+                </form>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+
+    <!-- ============================================
+    TOP-UP MODAL — FIX: this modal never existed before either.
+    The POST handler for topup_advance was already there and worked
+    fine, but there was no GET-triggered fetch and no modal to show
+    the form in, so clicking "Top-up" also did nothing.
+    ============================================ -->
+    <?php if($po_to_topup): ?>
+    <div class="modal show d-block" tabindex="-1" style="background: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-info text-white">
+                    <h5 class="modal-title"><i class="fas fa-plus-circle me-2"></i>Top Up Advance</h5>
+                    <a href="purchase_orders.php?tab=list" class="btn-close btn-close-white"></a>
+                </div>
+                <form method="POST">
+                    <div class="modal-body">
+                        <p><strong>Supplier:</strong> <?php echo htmlspecialchars($po_to_topup['supplier_name']); ?></p>
+                        <p><strong>Advance so far:</strong> <?php echo number_format($po_to_topup['advance_amount'], 0); ?> RWF</p>
+                        <input type="hidden" name="po_id" value="<?php echo $po_to_topup['id']; ?>">
+                        <div class="mb-3">
+                            <label class="form-label">Additional Amount (RWF) *</label>
+                            <input type="number" name="topup_amount" class="form-control" min="1" step="any" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Note (optional)</label>
+                            <input type="text" name="topup_notes" class="form-control" placeholder="e.g. So they can keep sourcing more">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <a href="purchase_orders.php?tab=list" class="btn btn-secondary">Cancel</a>
+                        <button type="submit" name="topup_advance" class="btn btn-info text-white">
+                            <i class="fas fa-check me-1"></i> Add Top-up
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 </div>
 
 <script>
@@ -785,6 +966,116 @@ function formatNumber(n) {
 
 function escapeHtml(str) {
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ============================================
+// FORMAL RECEIVE — submit handler
+// FIX: this modal + its submit logic never existed before.
+// ============================================
+function prepareFormalReceiveSubmit() {
+    const items = [];
+    document.querySelectorAll('.receive-qty').forEach(input => {
+        const received = parseInt(input.value) || 0;
+        if (received > 0) {
+            items.push({
+                item_id: input.dataset.itemId,
+                product_id: input.dataset.productId,
+                ordered_qty: input.dataset.ordered,
+                received_qty: received,
+                unit_price: input.dataset.price
+            });
+        }
+    });
+    if (items.length === 0) {
+        alert('Please enter quantity for at least one item.');
+        return false;
+    }
+    document.getElementById('received_json').value = JSON.stringify(items);
+    return confirm('Confirm receipt of these items? Stock will be updated automatically.');
+}
+
+// ============================================
+// ADVANCE DELIVERY CART — new, replaces the old full-catalog dump
+// ============================================
+let deliveryCart = [];
+
+function addDeliveryItem() {
+    const sel = document.getElementById('deliver_product_select');
+    if (!sel.value) { alert('Select a product first.'); return; }
+    const name = sel.options[sel.selectedIndex].dataset.name;
+    const cost = parseFloat(sel.options[sel.selectedIndex].dataset.cost) || 0;
+    const qty = parseInt(document.getElementById('deliver_qty').value);
+    const priceInput = document.getElementById('deliver_price');
+    const price = priceInput.value === '' ? cost : parseFloat(priceInput.value);
+
+    if (isNaN(qty) || qty < 1) { alert('Enter a valid quantity.'); return; }
+    if (isNaN(price) || price < 0) { alert('Enter a valid unit value.'); return; }
+
+    const existing = deliveryCart.find(i => i.product_id === sel.value);
+    if (existing) {
+        existing.quantity += qty;
+        existing.unit_price = price;
+    } else {
+        deliveryCart.push({ product_id: sel.value, name, quantity: qty, unit_price: price });
+    }
+
+    renderDeliveryCart();
+    document.getElementById('deliver_qty').value = '';
+    document.getElementById('deliver_price').value = '';
+    sel.value = '';
+}
+
+function removeDeliveryItem(idx) {
+    deliveryCart.splice(idx, 1);
+    renderDeliveryCart();
+}
+
+function renderDeliveryCart() {
+    const tbody = document.getElementById('delivery_cart_body');
+    tbody.innerHTML = '';
+    if (deliveryCart.length === 0) {
+        tbody.innerHTML = `<tr id="delivery_empty_row"><td colspan="5" class="text-center text-muted py-2">No items added yet — add whatever they actually brought back</td></tr>`;
+        document.getElementById('delivery_total_display').textContent = '0 RWF';
+        return;
+    }
+    let total = 0;
+    deliveryCart.forEach((item, idx) => {
+        const sub = item.quantity * item.unit_price;
+        total += sub;
+        tbody.innerHTML += `<tr>
+            <td>${escapeHtml(item.name)}</td>
+            <td>
+                <input type="number" min="1" value="${item.quantity}" class="form-control form-control-sm"
+                       style="width:80px" onchange="updateDeliveryQty(${idx}, this.value)">
+            </td>
+            <td>
+                <input type="number" min="0" step="100" value="${item.unit_price}" class="form-control form-control-sm"
+                       style="width:120px" onchange="updateDeliveryPrice(${idx}, this.value)">
+            </td>
+            <td>${formatNumber(sub)}</td>
+            <td><button type="button" class="btn btn-sm btn-danger" onclick="removeDeliveryItem(${idx})"><i class="fas fa-times"></i></button></td>
+        </tr>`;
+    });
+    document.getElementById('delivery_total_display').textContent = formatNumber(total) + ' RWF';
+}
+
+function updateDeliveryQty(idx, val)   { const q = parseInt(val);   if (q > 0)  { deliveryCart[idx].quantity = q; renderDeliveryCart(); } }
+function updateDeliveryPrice(idx, val) { const p = parseFloat(val); if (p >= 0) { deliveryCart[idx].unit_price = p; renderDeliveryCart(); } }
+
+function prepareAdvanceReceiveSubmit() {
+    if (deliveryCart.length === 0) {
+        alert('Add at least one product that was brought back.');
+        return false;
+    }
+    // Map to the shape the existing receive_items PHP handler expects
+    // for advance-type items: product_id, received_qty, unit_price.
+    const payload = deliveryCart.map(item => ({
+        product_id: item.product_id,
+        received_qty: item.quantity,
+        unit_price: item.unit_price
+    }));
+    document.getElementById('advance_received_json').value = JSON.stringify(payload);
+    return true;
 }
 </script>
 

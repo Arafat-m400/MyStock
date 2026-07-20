@@ -450,7 +450,7 @@ include '../includes/sidebar.php';
                                         <i class="fas fa-trash"></i>
                                     </a>
                                     <?php endif; ?>
-                                    <a href="../stock_in.php?supplier=<?php echo $s['id']; ?>" class="btn btn-outline-primary" title="View PO">
+                                    <a href="supplier_profile.php?id=<?php echo $s['id']; ?>" class="btn btn-outline-primary" title="View Purchase Orders & History">
                                         <i class="fas fa-file-purchase"></i>
                                     </a>
                                 </div>

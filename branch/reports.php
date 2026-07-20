@@ -412,7 +412,7 @@ include '../includes/sidebar.php';
     <div class="card shadow-sm">
         <div class="card-header d-flex justify-content-between align-items-center">
             <h5 class="mb-0"><i class="fas fa-calendar-check me-2"></i>End of Day — Last 5 Days</h5>
-            <a href="../end_of_day.php" class="btn btn-sm btn-primary">
+            <a href="end_of_day.php" class="btn btn-sm btn-primary">
                 <i class="fas fa-external-link-alt me-1"></i> Open End of Day
             </a>
         </div>
@@ -420,7 +420,7 @@ include '../includes/sidebar.php';
             <?php if(empty($eod_history)): ?>
             <div class="text-center py-4 text-muted">
                 No End of Day records yet.
-                <a href="../end_of_day.php" class="alert-link">Complete today's EOD</a>
+                <a href="end_of_day.php" class="alert-link">Complete today's EOD</a>
             </div>
             <?php else: ?>
             <div class="table-container">
@@ -441,7 +441,7 @@ include '../includes/sidebar.php';
                 </table>
             </div>
             <div class="text-center py-2">
-                <a href="../end_of_day.php" class="small">View full End of Day history &rarr;</a>
+                <a href="end_of_day.php" class="small">View full End of Day history &rarr;</a>
             </div>
             <?php endif; ?>
         </div>

@@ -146,6 +146,7 @@ function getProductDetails($pdo, $product_id, $branch_id) {
     // Sales history
     $sales = $pdo->prepare("
         SELECT 
+            s.id,
             s.invoice_no,
             s.sale_date,
             si.quantity,
@@ -644,7 +645,7 @@ include '../includes/sidebar.php';
                                         <?php foreach($product_details['sales'] as $sale): ?>
                                         <tr>
                                             <td>
-                                                <a href="../view_invoice.php?id=<?php echo $sale['invoice_no']; ?>" target="_blank">
+                                                <a href="view_invoice.php?id=<?php echo $sale['id']; ?>" target="_blank">
                                                     <?php echo htmlspecialchars($sale['invoice_no']); ?>
                                                 </a>
                                             </td>

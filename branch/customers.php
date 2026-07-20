@@ -298,7 +298,7 @@ VIEW CUSTOMER DETAILS
                         <td><?php echo $sale['item_count']; ?></td>
                         <td><strong><?php echo number_format($sale['grand_total'], 0); ?></strong></td>
                         <td>
-                            <a href="../view_invoice.php?id=<?php echo $sale['id']; ?>" target="_blank" class="btn btn-sm btn-primary">
+                            <a href="view_invoice.php?id=<?php echo $sale['id']; ?>" target="_blank" class="btn btn-sm btn-primary">
                                 <i class="fas fa-file-invoice"></i>
                             </a>
                         </td>

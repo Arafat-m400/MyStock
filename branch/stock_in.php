@@ -86,6 +86,140 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['quick_add'])) {
 }
 
 // ============================================
+// RECEIVE ITEMS (for both formal and advance)
+// ============================================
+
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['receive_items'])) {
+    try {
+        $pdo->beginTransaction();
+        
+        $po_id = $_POST['po_id'];
+        $items_received = json_decode($_POST['received_json'], true);
+        
+        // Get PO type and supplier
+        $po_info = $pdo->prepare("SELECT po_type, supplier_id, advance_amount FROM purchase_orders WHERE id = ? AND branch_id = ?");
+        $po_info->execute([$po_id, $branch_id]);
+        $po = $po_info->fetch();
+        
+        if (!$po) throw new Exception("Purchase order not found.");
+        
+        $total_goods_value = 0;
+        $any_received = false;
+        
+        foreach ($items_received as $item) {
+            $received_qty = intval($item['received_qty']);
+            $unit_price = floatval($item['unit_price'] ?? 0);
+            
+            if ($received_qty > 0) {
+                $any_received = true;
+                $subtotal = $received_qty * $unit_price;
+                $total_goods_value += $subtotal;
+                
+                // Get product for stock update
+                $prod = $pdo->prepare("SELECT quantity, cost_price FROM products WHERE id = ? AND branch_id = ?");
+                $prod->execute([$item['product_id'], $branch_id]);
+                $current = $prod->fetch();
+                
+                if (!$current) throw new Exception("Product not found.");
+                
+                $new_qty = $current['quantity'] + $received_qty;
+                $new_cost = (($current['quantity'] * $current['cost_price']) + ($received_qty * $unit_price)) / $new_qty;
+                
+                // Update product stock
+                $pdo->prepare("UPDATE products SET quantity = ?, cost_price = ?, last_purchase_date = CURDATE() WHERE id = ? AND branch_id = ?")
+                    ->execute([$new_qty, round($new_cost, 2), $item['product_id'], $branch_id]);
+                
+                // Record in purchases table
+                $pdo->prepare("
+                    INSERT INTO purchases (branch_id, supplier_id, invoice_no, purchase_date, total_amount, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ")->execute([
+                    $branch_id,
+                    $po['supplier_id'],
+                    'PO-' . $po_id,
+                    date('Y-m-d'),
+                    $subtotal,
+                    $_SESSION['user_id']
+                ]);
+                
+                $purchase_id = $pdo->lastInsertId();
+                $pdo->prepare("
+                    INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_price, subtotal)
+                    VALUES (?, ?, ?, ?, ?)
+                ")->execute([$purchase_id, $item['product_id'], $received_qty, $unit_price, $subtotal]);
+                
+                // Update PO item (if formal order)
+                if ($po['po_type'] == 'formal' && isset($item['item_id']) && $item['item_id'] > 0) {
+                    $pdo->prepare("
+                        UPDATE purchase_order_items 
+                        SET quantity_received = quantity_received + ?
+                        WHERE id = ? AND po_id = ?
+                    ")->execute([$received_qty, $item['item_id'], $po_id]);
+                }
+            }
+        }
+        
+        // Update PO status based on type
+        if ($po['po_type'] == 'formal') {
+            // Check if all items received
+            $check = $pdo->prepare("
+                SELECT COUNT(*) as total, 
+                       SUM(CASE WHEN quantity_received >= quantity_ordered THEN 1 ELSE 0 END) as completed
+                FROM purchase_order_items 
+                WHERE po_id = ?
+            ");
+            $check->execute([$po_id]);
+            $result = $check->fetch();
+            
+            if ($result['total'] == $result['completed']) {
+                $status = 'completed';
+            } else {
+                $status = 'partial';
+            }
+            $pdo->prepare("UPDATE purchase_orders SET status = ? WHERE id = ?")->execute([$status, $po_id]);
+            
+        } else {
+            // Advance: calculate balance
+            $advance_amount = $po['advance_amount'];
+            $balance = $advance_amount - $total_goods_value;
+            
+            // Update advance balance
+            $pdo->prepare("
+                UPDATE purchase_orders 
+                SET status = ?, 
+                    balance = ?,
+                    balance_direction = ?
+                WHERE id = ?
+            ")->execute([
+                $balance == 0 ? 'completed' : 'partial',
+                abs($balance),
+                $balance >= 0 ? 'supplier_owes' : 'we_owe',
+                $po_id
+            ]);
+            
+            // Update supplier debt
+            $pdo->prepare("
+                UPDATE suppliers 
+                SET total_debt = ?
+                WHERE id = ?
+            ")->execute([abs($balance), $po['supplier_id']]);
+        }
+        
+        $pdo->commit();
+        
+        logAction($pdo, 'PO Received', "PO #$po_id received items");
+        $message = '<div class="alert alert-success">✅ Items received and stock updated!</div>';
+        
+        header("Location: stock_in.php?tab=purchase_orders&msg=received");
+        exit();
+        
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        $message = '<div class="alert alert-danger">❌ Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
+    }
+}
+
+// ============================================
 // CREATE PURCHASE ORDER (Formal + Advance)
 // ============================================
 
@@ -492,8 +626,9 @@ include '../includes/sidebar.php';
                             <td>
                                 <div class="btn-group btn-group-sm">
                                     <?php if($po['status'] != 'completed' && $po['status'] != 'cancelled'): ?>
-                                    <a href="purchase_orders.php?receive=<?php echo $po['id']; ?>" class="btn btn-success">
-                                        <i class="fas fa-box"></i>
+                                    <!-- FIXED: Now points to stock_in.php with receive parameter -->
+                                    <a href="?receive=<?php echo $po['id']; ?>" class="btn btn-success">
+                                        <i class="fas fa-box"></i> Receive
                                     </a>
                                     <?php endif; ?>
                                     <a href="view_po.php?id=<?php echo $po['id']; ?>" target="_blank" class="btn btn-outline-primary">
@@ -511,6 +646,153 @@ include '../includes/sidebar.php';
     </div>
     <?php endif; ?>
 </div>
+
+<!-- ============================================
+RECEIVE PO MODAL - Added after the main content
+============================================ -->
+<?php if(isset($_GET['receive']) && is_numeric($_GET['receive'])): 
+    $po_id = $_GET['receive'];
+    
+    $po = $pdo->prepare("
+        SELECT po.*, s.name as supplier_name, s.id as supplier_id
+        FROM purchase_orders po
+        JOIN suppliers s ON po.supplier_id = s.id
+        WHERE po.id = ? AND po.branch_id = ? AND po.status IN ('pending', 'partial')
+    ");
+    $po->execute([$po_id, $branch_id]);
+    $po_to_receive = $po->fetch();
+    
+    if ($po_to_receive):
+        // Get items to receive
+        if ($po_to_receive['po_type'] == 'formal') {
+            $items = $pdo->prepare("
+                SELECT poi.*, p.name as product_name, p.unit, 
+                       (poi.quantity_ordered - poi.quantity_received) as remaining,
+                       poi.id as item_id
+                FROM purchase_order_items poi
+                JOIN products p ON poi.product_id = p.id
+                WHERE poi.po_id = ?
+            ");
+            $items->execute([$po_id]);
+        } else {
+            // Advance: show all products
+            $items = $pdo->prepare("
+                SELECT p.id as product_id, p.name as product_name, p.unit, p.cost_price as unit_price,
+                       0 as quantity_ordered, 0 as quantity_received, 9999 as remaining,
+                       0 as item_id
+                FROM products p
+                WHERE p.branch_id = ?
+                ORDER BY p.name
+            ");
+            $items->execute([$branch_id]);
+        }
+        $po_items_to_receive = $items->fetchAll();
+    endif;
+?>
+
+<div class="modal show d-block" tabindex="-1" style="background: rgba(0,0,0,0.5); position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1050; overflow-y: auto;">
+    <div class="modal-dialog modal-lg" style="margin: 30px auto;">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-box me-2"></i>
+                    Receive Items - <?php echo htmlspecialchars($po_to_receive['po_number'] ?? 'PO #' . $po_id); ?>
+                </h5>
+                <a href="stock_in.php?tab=purchase_orders" class="btn-close btn-close-white"></a>
+            </div>
+            <form method="POST">
+                <div class="modal-body">
+                    <p><strong>Supplier:</strong> <?php echo htmlspecialchars($po_to_receive['supplier_name'] ?? 'Unknown'); ?></p>
+                    <p><strong>Type:</strong> <?php echo ucfirst($po_to_receive['po_type'] ?? 'formal'); ?></p>
+                    <?php if($po_to_receive['po_type'] == 'advance'): ?>
+                    <p><strong>Advance Amount:</strong> <?php echo number_format($po_to_receive['advance_amount'] ?? 0, 0); ?> RWF</p>
+                    <?php endif; ?>
+                    
+                    <input type="hidden" name="po_id" value="<?php echo $po_id; ?>">
+                    <input type="hidden" name="received_json" id="received_json">
+                    
+                    <div class="table-container">
+                        <table class="table table-bordered">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Product</th>
+                                    <th>Ordered</th>
+                                    <th>Received</th>
+                                    <th>To Receive</th>
+                                    <th>Unit Price</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php if(empty($po_items_to_receive)): ?>
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted py-3">
+                                        No products available to receive.
+                                    </td>
+                                </tr>
+                                <?php else: ?>
+                                <?php foreach($po_items_to_receive as $item): 
+                                    $remaining = $item['remaining'] ?? 0;
+                                    $max_qty = $po_to_receive['po_type'] == 'advance' ? 9999 : $remaining;
+                                ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($item['product_name']); ?></td>
+                                    <td><?php echo $po_to_receive['po_type'] == 'formal' ? $item['quantity_ordered'] : '—'; ?></td>
+                                    <td><?php echo $po_to_receive['po_type'] == 'formal' ? $item['quantity_received'] : '0'; ?></td>
+                                    <td>
+                                        <input type="number" class="form-control receive-qty" 
+                                               data-item-id="<?php echo $item['item_id'] ?? 0; ?>"
+                                               data-product-id="<?php echo $item['product_id']; ?>"
+                                               data-ordered="<?php echo $item['quantity_ordered'] ?? 0; ?>"
+                                               data-price="<?php echo $item['unit_price']; ?>"
+                                               min="0" max="<?php echo $max_qty; ?>"
+                                               value="<?php echo $max_qty > 0 ? min($max_qty, 1) : 0; ?>"
+                                               style="width:100px;">
+                                    </td>
+                                    <td><?php echo number_format($item['unit_price'], 0); ?> RWF</td>
+                                </tr>
+                                <?php endforeach; ?>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <a href="stock_in.php?tab=purchase_orders" class="btn btn-secondary">Cancel</a>
+                    <button type="submit" name="receive_items" class="btn btn-success" onclick="prepareReceiveSubmit()">
+                        <i class="fas fa-check me-1"></i> Confirm Receipt & Update Stock
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function prepareReceiveSubmit() {
+    const items = [];
+    document.querySelectorAll('.receive-qty').forEach(input => {
+        const received = parseInt(input.value) || 0;
+        if (received > 0) {
+            items.push({
+                item_id: input.dataset.itemId || 0,
+                product_id: input.dataset.productId,
+                ordered_qty: input.dataset.ordered || 0,
+                received_qty: received,
+                unit_price: parseFloat(input.dataset.price) || 0
+            });
+        }
+    });
+    
+    if (items.length === 0) {
+        alert('Please enter quantity for at least one item.');
+        return false;
+    }
+    
+    document.getElementById('received_json').value = JSON.stringify(items);
+    return confirm('Confirm receipt of these items? Stock will be updated automatically.');
+}
+</script>
+<?php endif; ?>
 
 <script>
 let poCart = [];
@@ -652,6 +934,9 @@ function escapeHtml(str) {
     color: #6c757d;
     font-size: 13px;
     margin-top: 5px;
+}
+.modal.show.d-block {
+    display: block !important;
 }
 </style>
 

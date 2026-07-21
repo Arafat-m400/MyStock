@@ -183,6 +183,28 @@ function getProductDetails($pdo, $product_id, $branch_id) {
     $purchases->execute([$product_id, $branch_id]);
     $purchase_data = $purchases->fetchAll();
     
+    // Stock history (from purchases and advance POs)
+    $stock_history = $pdo->prepare("
+        SELECT 
+            p.purchase_date as date,
+            CASE 
+                WHEN p.invoice_no LIKE 'PO-%' THEN 'Advance PO'
+                ELSE 'Regular Purchase'
+            END as type,
+            s.name as supplier_name,
+            pi.quantity,
+            pi.unit_price,
+            p.invoice_no
+        FROM purchase_items pi
+        JOIN purchases p ON pi.purchase_id = p.id
+        LEFT JOIN suppliers s ON p.supplier_id = s.id
+        WHERE pi.product_id = ? AND p.branch_id = ?
+        ORDER BY p.purchase_date DESC
+        LIMIT 50
+    ");
+    $stock_history->execute([$product_id, $branch_id]);
+    $stock_history_data = $stock_history->fetchAll();
+    
     // Profit/Loss summary
     $summary = $pdo->prepare("
         SELECT 
@@ -200,6 +222,7 @@ function getProductDetails($pdo, $product_id, $branch_id) {
     return [
         'sales' => $sales_data,
         'purchases' => $purchase_data,
+        'stock_history' => $stock_history_data,
         'summary' => $summary_data
     ];
 }
@@ -612,8 +635,48 @@ include '../includes/sidebar.php';
                                 <div class="col-md-6">
                                     <div class="card">
                                         <div class="card-body">
-                                            <h6>Stock History</h6>
-                                            <canvas id="stockHistoryChart" height="150"></canvas>
+                                            <h6><i class="fas fa-history me-2 text-info"></i>Stock History</h6>
+                                            <?php if(empty($product_details['stock_history'])): ?>
+                                            <div class="text-center text-muted py-3">
+                                                <i class="fas fa-inbox fa-2x mb-2 d-block"></i>
+                                                No stock history available
+                                            </div>
+                                            <?php else: ?>
+                                            <div class="table-responsive" style="max-height: 350px; overflow-y: auto;">
+                                                <table class="table table-sm table-hover">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Date</th>
+                                                            <th>Supplier</th>
+                                                            <th>Qty</th>
+                                                            <th>Type</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        <?php foreach($product_details['stock_history'] as $history): ?>
+                                                        <tr>
+                                                            <td>
+                                                                <small><?php echo date('M d, Y', strtotime($history['date'])); ?></small>
+                                                            </td>
+                                                            <td>
+                                                                <small><?php echo htmlspecialchars($history['supplier_name'] ?? 'Unknown'); ?></small>
+                                                            </td>
+                                                            <td>
+                                                                <strong><?php echo $history['quantity']; ?></strong>
+                                                                <br>
+                                                                <small class="text-muted">@ <?php echo number_format($history['unit_price'], 0); ?> RWF</small>
+                                                            </td>
+                                                            <td>
+                                                                <span class="badge bg-<?php echo $history['type'] == 'Advance PO' ? 'success' : 'primary'; ?>">
+                                                                    <?php echo $history['type']; ?>
+                                                                </span>
+                                                            </td>
+                                                        </tr>
+                                                        <?php endforeach; ?>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            <?php endif; ?>
                                         </div>
                                     </div>
                                 </div>
@@ -743,39 +806,6 @@ function filterProducts() {
 document.addEventListener('DOMContentLoaded', function() {
     const modal = new bootstrap.Modal(document.getElementById('productModal'));
     modal.show();
-});
-<?php endif; ?>
-
-// Stock History Chart (if viewing product)
-<?php if($detail_product): ?>
-document.addEventListener('DOMContentLoaded', function() {
-    const ctx = document.getElementById('stockHistoryChart');
-    if (ctx) {
-        new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-                datasets: [{
-                    label: 'Stock Level',
-                    data: [50, 45, 30, 25, 20, <?php echo $detail_product['quantity']; ?>],
-                    borderColor: 'rgba(13, 110, 253, 1)',
-                    backgroundColor: 'rgba(13, 110, 253, 0.1)',
-                    fill: true,
-                    tension: 0.4
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false }
-                },
-                scales: {
-                    y: { beginAtZero: true }
-                }
-            }
-        });
-    }
 });
 <?php endif; ?>
 </script>

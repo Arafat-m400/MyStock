@@ -25,28 +25,43 @@ $active_tab = $_GET['tab'] ?? 'create';
 // show up on the Debts page.
 // ============================================
 function syncSupplierDebtForAdvancePO($pdo, $po_id, $supplier_id, $branch_id, $direction, $balance) {
-    $existing = $pdo->prepare("SELECT * FROM supplier_debts WHERE po_id = ? AND branch_id = ?");
-    $existing->execute([$po_id, $branch_id]);
-    $debt = $existing->fetch();
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS supplier_debts (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            supplier_id INT NOT NULL,
+            branch_id INT NOT NULL,
+            po_id INT NULL,
+            amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+            paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+            remaining DECIMAL(12,2) NOT NULL DEFAULT 0,
+            status VARCHAR(20) NOT NULL DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )");
 
-    if ($direction === 'we_owe' && $balance < 0) {
-        $owed = abs($balance);
-        if ($debt) {
-            $paid = $debt['paid_amount'];
-            $remaining = max($owed - $paid, 0);
-            $status = $remaining <= 0 ? 'paid' : ($paid > 0 ? 'partial' : 'pending');
-            $pdo->prepare("UPDATE supplier_debts SET amount = ?, remaining = ?, status = ? WHERE id = ?")
-                ->execute([$owed, $remaining, $status, $debt['id']]);
-        } else {
-            $pdo->prepare("
-                INSERT INTO supplier_debts (supplier_id, branch_id, po_id, amount, paid_amount, remaining, status)
-                VALUES (?, ?, ?, ?, 0, ?, 'pending')
-            ")->execute([$supplier_id, $branch_id, $po_id, $owed, $owed]);
+        $existing = $pdo->prepare("SELECT * FROM supplier_debts WHERE po_id = ? AND branch_id = ?");
+        $existing->execute([$po_id, $branch_id]);
+        $debt = $existing->fetch();
+
+        if ($direction === 'we_owe' && $balance < 0) {
+            $owed = abs($balance);
+            if ($debt) {
+                $paid = (float) ($debt['paid_amount'] ?? 0);
+                $remaining = max($owed - $paid, 0);
+                $status = $remaining <= 0 ? 'paid' : ($paid > 0 ? 'partial' : 'pending');
+                $pdo->prepare("UPDATE supplier_debts SET amount = ?, remaining = ?, status = ? WHERE id = ?")
+                    ->execute([$owed, $remaining, $status, $debt['id']]);
+            } else {
+                $pdo->prepare("
+                    INSERT INTO supplier_debts (supplier_id, branch_id, po_id, amount, paid_amount, remaining, status)
+                    VALUES (?, ?, ?, ?, 0, ?, 'pending')
+                ")->execute([$supplier_id, $branch_id, $po_id, $owed, $owed]);
+            }
+        } elseif ($debt && $debt['status'] != 'paid') {
+            $pdo->prepare("UPDATE supplier_debts SET remaining = 0, status = 'paid' WHERE id = ?")
+                ->execute([$debt['id']]);
         }
-    } elseif ($debt && $debt['status'] != 'paid') {
-        // Balance flipped back to settled/supplier_owes — close out the payable.
-        $pdo->prepare("UPDATE supplier_debts SET remaining = 0, status = 'paid' WHERE id = ?")
-            ->execute([$debt['id']]);
+    } catch (Exception $e) {
+        error_log('syncSupplierDebtForAdvancePO failed: ' . $e->getMessage());
     }
 }
 
@@ -311,10 +326,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['receive_items'])) {
             $pdo->prepare("UPDATE products SET quantity = ?, cost_price = ?, last_purchase_date = CURDATE() WHERE id = ? AND branch_id = ?")
                 ->execute([$new_qty, round($new_cost, 2), $product_id, $branch_id]);
 
+            $invoice_no = 'PO-' . $po_id . '-' . date('YmdHis') . '-' . mt_rand(1000, 9999);
             $pdo->prepare("
-                INSERT INTO purchases (branch_id, supplier_id, invoice_no, purchase_date, total_amount, created_by)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ")->execute([$branch_id, $po['supplier_id'], 'PO-' . $po_id, date('Y-m-d'), $subtotal, $_SESSION['user_id']]);
+                INSERT INTO purchases (branch_id, supplier_id, purchase_order_id, invoice_no, purchase_date, total_amount, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ")->execute([$branch_id, $po['supplier_id'], $po_id, $invoice_no, date('Y-m-d'), $subtotal, $_SESSION['user_id']]);
             $purchase_id = $pdo->lastInsertId();
             $pdo->prepare("
                 INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_price, subtotal)
@@ -324,8 +340,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['receive_items'])) {
 
         if (!$any_received) throw new Exception("Enter a quantity for at least one item.");
 
+        $received_value_stmt = $pdo->prepare("
+            SELECT COALESCE(SUM(subtotal), 0) FROM purchase_order_items
+            WHERE po_id = ?
+        ");
+        $received_value_stmt->execute([$po_id]);
+        $received_value = (float) $received_value_stmt->fetchColumn();
+
         if ($po['po_type'] == 'formal') {
-            $check = $pdo->prepare("
+            $check = $pdo->prepare(" 
                 SELECT COUNT(*) as total,
                        SUM(CASE WHEN quantity_received >= quantity_ordered THEN 1 ELSE 0 END) as completed
                 FROM purchase_order_items
@@ -334,41 +357,31 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['receive_items'])) {
             $check->execute([$po_id]);
             $r = $check->fetch();
             $status = ($r['total'] > 0 && $r['total'] == $r['completed']) ? 'completed' : 'partial';
-            $pdo->prepare("UPDATE purchase_orders SET status = ? WHERE id = ?")->execute([$status, $po_id]);
+            $pdo->prepare("UPDATE purchase_orders SET status = ?, received_value = ? WHERE id = ?")
+                ->execute([$status, $received_value, $po_id]);
 
         } else {
-            $received_stmt = $pdo->prepare("
-                SELECT COALESCE(SUM(subtotal), 0) FROM purchase_order_items
-                WHERE po_id = ?
-            ");
-            $received_stmt->execute([$po_id]);
-            $total_received_to_date = $received_stmt->fetchColumn();
-
-            $balance = $po['advance_amount'] - $total_received_to_date;
+            $balance = $po['advance_amount'] - $received_value;
             $direction = $balance == 0 ? 'settled' : ($balance > 0 ? 'supplier_owes' : 'we_owe');
             $status = $balance <= 0 ? 'completed' : 'partial';
 
-            // FIX: total_amount was never updated for advance POs, which is
-            // what view_po.php's "Goods Value Received So Far" reads from —
-            // it always showed 0 no matter how much was actually received.
             $pdo->prepare("
                 UPDATE purchase_orders
-                SET status = ?, balance = ?, balance_direction = ?, total_amount = ?
+                SET status = ?, balance = ?, balance_direction = ?, total_amount = ?, received_value = ?
                 WHERE id = ?
-            ")->execute([$status, abs($balance), $direction, $total_received_to_date, $po_id]);
+            ")->execute([$status, abs($balance), $direction, $received_value, $received_value, $po_id]);
 
             $pdo->prepare("UPDATE suppliers SET total_debt = ? WHERE id = ?")
                 ->execute([$direction == 'supplier_owes' ? abs($balance) : 0, $po['supplier_id']]);
-
-            // FIX: "we owe the supplier" never showed up on the Debts page
-            // because nothing ever wrote to supplier_debts — only the
-            // suppliers.total_debt summary column was touched.
-            syncSupplierDebtForAdvancePO($pdo, $po_id, $po['supplier_id'], $branch_id, $direction, $balance);
         }
 
         $pdo->commit();
 
         logAction($pdo, 'PO Received', "PO #$po_id received items worth " . number_format($total_goods_value, 0));
+
+        if ($po['po_type'] == 'advance') {
+            syncSupplierDebtForAdvancePO($pdo, $po_id, $po['supplier_id'], $branch_id, $direction, $balance);
+        }
 
         header("Location: purchase_orders.php?tab=list&msg=received");
         exit();
@@ -417,6 +430,26 @@ $pos = $pdo->prepare("
 ");
 $pos->execute([$branch_id]);
 $pos = $pos->fetchAll();
+
+foreach ($pos as $index => $po_row) {
+    if ($po_row['po_type'] === 'advance') {
+        $balance = $po_row['advance_amount'] - $po_row['received_value'];
+        $direction = $balance == 0 ? 'settled' : ($balance > 0 ? 'supplier_owes' : 'we_owe');
+        $status = $balance <= 0 ? 'completed' : 'partial';
+        if ($po_row['status'] !== $status || $po_row['balance_direction'] !== $direction || (float) $po_row['balance'] !== abs($balance) || (float) $po_row['total_amount'] !== (float) $po_row['received_value']) {
+            $pdo->prepare("
+                UPDATE purchase_orders
+                SET status = ?, balance = ?, balance_direction = ?, total_amount = ?, received_value = ?
+                WHERE id = ?
+            ")->execute([$status, abs($balance), $direction, $po_row['received_value'], $po_row['received_value'], $po_row['id']]);
+            $pos[$index]['status'] = $status;
+            $pos[$index]['balance'] = abs($balance);
+            $pos[$index]['balance_direction'] = $direction;
+            $pos[$index]['total_amount'] = $po_row['received_value'];
+            $pos[$index]['received_value'] = $po_row['received_value'];
+        }
+    }
+}
 
 // ============================================
 // GET PO FOR RECEIVING
@@ -496,7 +529,9 @@ include '../includes/sidebar.php';
         </div>
     </div>
 
-    <?php echo $message; ?>
+    <div class="mb-3" style="position: sticky; top: 0; z-index: 1050;">
+        <?php echo $message; ?>
+    </div>
 
     <!-- ============================================
     CREATE PO TAB
@@ -784,9 +819,19 @@ include '../includes/sidebar.php';
                 <?php else: ?>
                 <form method="POST" onsubmit="return prepareAdvanceReceiveSubmit()">
                     <div class="modal-body">
+                        <?php if (!empty($message) && strpos($message, 'alert-danger') !== false): ?>
+                        <div class="alert alert-danger mb-3">
+                            <?php echo htmlspecialchars(strip_tags($message)); ?>
+                        </div>
+                        <?php endif; ?>
                         <p><strong>Supplier:</strong> <?php echo htmlspecialchars($po_to_receive['supplier_name']); ?></p>
                         <input type="hidden" name="po_id" value="<?php echo $po_to_receive['id']; ?>">
                         <input type="hidden" name="received_json" id="advance_received_json">
+
+                        <div class="alert alert-info mb-3">
+                            <strong>Advance delivery entry</strong>
+                            <div class="small">Select a product, enter the quantity and unit value, then add it to the cart below. The stock and PO values will update after you confirm.</div>
+                        </div>
 
                         <div class="row text-center mb-3">
                             <div class="col-4">

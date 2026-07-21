@@ -45,6 +45,21 @@ foreach ($items as $item) {
     $total_received += $item['quantity_received'];
 }
 
+// Top-up history (advance POs only) — so it's clear WHEN each top-up
+// happened, not just the running advance_amount total.
+$topups = [];
+if ($po['po_type'] === 'advance') {
+    $tu = $pdo->prepare("
+        SELECT t.*, u.full_name as created_by_name
+        FROM po_topups t
+        LEFT JOIN users u ON t.created_by = u.id
+        WHERE t.po_id = ?
+        ORDER BY t.created_at ASC
+    ");
+    $tu->execute([$po_id]);
+    $topups = $tu->fetchAll();
+}
+
 include '../includes/header.php';
 include '../includes/sidebar.php';
 ?>
@@ -68,7 +83,7 @@ include '../includes/sidebar.php';
             <!-- FIX: advances route to ?deliver=, not ?receive= — the old
                  link went nowhere for advance-type POs because that
                  endpoint only ever built a modal for formal orders. -->
-            <a href="purchase_orders.php?deliver=<?php echo $po['id']; ?>" class="btn btn-success">
+            <a href="purchase_orders.php?receive=<?php echo $po['id']; ?>" class="btn btn-success">
                 <i class="fas fa-box me-1"></i> Record Delivery
             </a>
             <a href="purchase_orders.php?topup=<?php echo $po['id']; ?>" class="btn btn-outline-success">
@@ -205,6 +220,33 @@ include '../includes/sidebar.php';
                 <?php endif; ?>
             </div>
         </div>
+    </div>
+</div>
+
+<!-- Top-Up History — dates of every advance/top-up transaction on this PO -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="fas fa-history me-2"></i>Advance / Top-Up History</h5>
+        <span class="badge bg-secondary"><?php echo count($topups); ?> entries</span>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+            <thead class="table-light">
+                <tr><th>Date</th><th>Amount</th><th>Note</th><th>By</th></tr>
+            </thead>
+            <tbody>
+                <?php if(empty($topups)): ?>
+                <tr><td colspan="4" class="text-center text-muted py-3">No top-ups recorded.</td></tr>
+                <?php else: foreach($topups as $t): ?>
+                <tr>
+                    <td><?php echo date('M j, Y g:i A', strtotime($t['created_at'])); ?></td>
+                    <td><strong><?php echo number_format($t['amount'], 0); ?> RWF</strong></td>
+                    <td><?php echo htmlspecialchars($t['notes'] ?: '—'); ?></td>
+                    <td><?php echo htmlspecialchars($t['created_by_name'] ?? 'System'); ?></td>
+                </tr>
+                <?php endforeach; endif; ?>
+            </tbody>
+        </table>
     </div>
 </div>
 <?php endif; ?>

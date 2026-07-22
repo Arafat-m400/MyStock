@@ -113,6 +113,35 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['pay_supplier_debt'])) 
         ");
         $stmt->execute([$debt['supplier_id'], $debt['supplier_id']]);
         
+        // If this debt is linked to an advance PO, update the PO balance
+        if ($debt['po_id']) {
+            $po_stmt = $pdo->prepare("SELECT * FROM purchase_orders WHERE id = ?");
+            $po_stmt->execute([$debt['po_id']]);
+            $po = $po_stmt->fetch();
+            
+            if ($po && $po['po_type'] === 'advance') {
+                // Recalculate balance using same logic as receive handler: advance - goods
+                $goods_value = (float) ($po['total_amount'] ?? 0);
+                $advance = (float) ($po['advance_amount'] ?? 0);
+                $balance = $advance - $goods_value;
+                
+                if ($balance == 0) {
+                    $po_direction = 'settled';
+                } elseif ($balance > 0) {
+                    $po_direction = 'supplier_owes';  // They delivered less than we paid
+                } else {
+                    $po_direction = 'we_owe';  // They delivered more than we paid
+                }
+                
+                $update_po = $pdo->prepare("
+                    UPDATE purchase_orders 
+                    SET balance = ?, balance_direction = ?
+                    WHERE id = ?
+                ");
+                $update_po->execute([abs($balance), $po_direction, $debt['po_id']]);
+            }
+        }
+        
         $pdo->commit();
         
         $message = '<div class="alert alert-success">✅ Payment recorded! Remaining debt: ' . number_format($new_remaining, 0) . ' RWF</div>';

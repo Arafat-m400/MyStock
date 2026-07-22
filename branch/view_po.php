@@ -27,6 +27,33 @@ if (!$po) {
     die("Purchase Order not found.");
 }
 
+// For advance POs, verify/recalculate balance based on actual debt status
+if ($po['po_type'] === 'advance') {
+    $debt_stmt = $pdo->prepare("SELECT * FROM supplier_debts WHERE po_id = ? AND branch_id = ?");
+    $debt_stmt->execute([$po_id, $branch_id]);
+    $debt = $debt_stmt->fetch();
+    
+    if ($debt && $debt['remaining'] > 0) {
+        // If there's an outstanding debt, use its remaining balance
+        $po['balance'] = $debt['remaining'];
+        $po['balance_direction'] = 'we_owe';
+    } else {
+        // Recalculate fresh using same logic as receive handler: advance - goods
+        $goods_value = (float) ($po['total_amount'] ?? 0);
+        $advance = (float) ($po['advance_amount'] ?? 0);
+        $balance = $advance - $goods_value;
+        
+        $po['balance'] = abs($balance);
+        if ($balance == 0) {
+            $po['balance_direction'] = 'settled';
+        } elseif ($balance > 0) {
+            $po['balance_direction'] = 'supplier_owes';
+        } else {
+            $po['balance_direction'] = 'we_owe';
+        }
+    }
+}
+
 // Get PO items
 $items = $pdo->prepare("
     SELECT poi.*, p.name as product_name, p.unit

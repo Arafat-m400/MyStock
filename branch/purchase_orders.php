@@ -1108,7 +1108,7 @@ function prepareFormalReceiveSubmit() {
         return false;
     }
     document.getElementById('received_json').value = JSON.stringify(items);
-    return confirm('Confirm receipt of these items? Stock will be updated automatically.');
+    return confirm('Confirm receipt of these items?');
 }
 
 let deliveryCart = [];
@@ -1187,7 +1187,7 @@ function prepareAdvanceReceiveSubmit() {
         unit_price: item.unit_price
     }));
     document.getElementById('advance_received_json').value = JSON.stringify(payload);
-    return confirm('Confirm receipt of these items? Stock will be updated automatically.');
+    return confirm('Confirm receipt of these items?');
 }
 </script>
 

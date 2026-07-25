@@ -249,7 +249,7 @@ ADD/EDIT EXPENSE FORM
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Amount (RWF) *</label>
-                    <input type="number" name="amount" class="form-control" required min="0" step="100"
+                    <input type="number" name="amount" class="form-control" required min="0" step="any"
                            value="<?php echo $edit_expense['amount'] ?? ''; ?>">
                 </div>
                 <div class="col-md-6">

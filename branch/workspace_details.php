@@ -482,11 +482,11 @@ include '../includes/sidebar.php';
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Quantity *</label>
-                        <input type="number" name="quantity" class="form-control" required min="0.01" step="0.01" placeholder="10">
+                        <input type="number" name="quantity" class="form-control" required min="0.01" placeholder="10">
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Unit Cost (RWF) *</label>
-                        <input type="number" name="unit_cost" class="form-control" required min="0" step="100" placeholder="8500">
+                        <input type="number" name="unit_cost" class="form-control" required min="0" placeholder="8500">
                     </div>
                     <div class="col-md-2">
                         <label class="form-label">Source</label>
@@ -601,7 +601,7 @@ include '../includes/sidebar.php';
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Amount (RWF) *</label>
-                        <input type="number" name="amount" class="form-control" required min="0" step="100" placeholder="50000">
+                        <input type="number" name="amount" class="form-control" required min="0" placeholder="50000">
                     </div>
                     <div class="col-md-2">
                         <label class="form-label">Date</label>
@@ -715,11 +715,11 @@ include '../includes/sidebar.php';
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Quantity Produced *</label>
-                        <input type="number" name="quantity_produced" class="form-control" required min="0.01" step="0.01" placeholder="100">
+                        <input type="number" name="quantity_produced" class="form-control" required min="0.01" placeholder="100">
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Selling Price/Unit (RWF) *</label>
-                        <input type="number" name="selling_price_per_unit" class="form-control" required min="0" step="100" placeholder="15000">
+                        <input type="number" name="selling_price_per_unit" class="form-control" required min="0" placeholder="15000">
                     </div>
                     <div class="col-md-2">
                         <label class="form-label">Total Value</label>
@@ -829,7 +829,7 @@ include '../includes/sidebar.php';
                         <p><strong>Available:</strong> <span id="transfer_available"></span></p>
                         <div class="mb-3">
                             <label class="form-label">Quantity to Transfer *</label>
-                            <input type="number" name="transfer_quantity" class="form-control" required min="0.01" step="0.01" id="transfer_quantity">
+                            <input type="number" name="transfer_quantity" class="form-control" required min="0.01" id="transfer_quantity">
                         </div>
                     </div>
                     <div class="modal-footer">

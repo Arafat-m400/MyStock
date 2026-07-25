@@ -56,6 +56,63 @@ $cash_expenses->execute([$branch_id, $selected_date]);
 $cash_expenses = $cash_expenses->fetchColumn();
 
 // ============================================
+// REGULAR PURCHASES (Stock In - Cash paid to suppliers)
+// ONLY include regular purchases (purchase_order_id IS NULL)
+// NOT advance PO deliveries (already paid via advance)
+// NOT formal PO deliveries (paid later via supplier debt)
+// ============================================
+
+$purchases_cash = $pdo->prepare("
+    SELECT COALESCE(SUM(total_amount), 0) as total
+    FROM purchases
+    WHERE branch_id = ? 
+    AND purchase_date = ?
+    AND purchase_order_id IS NULL
+");
+$purchases_cash->execute([$branch_id, $selected_date]);
+$purchases_cash = $purchases_cash->fetchColumn();
+
+// ============================================
+// WORKSPACE INPUTS - NEW PURCHASES (Cash paid to suppliers directly)
+// These are purchases made directly for workspace consumption
+// e.g., buying maize from the field for flour production
+// ============================================
+
+$workspace_purchases_cash = $pdo->prepare("
+    SELECT COALESCE(SUM(wi.total_cost), 0) as total
+    FROM workspace_inputs wi
+    JOIN workspaces w ON wi.workspace_id = w.id
+    WHERE w.branch_id = ? 
+    AND DATE(wi.created_at) = ?
+    AND wi.source = 'purchase'
+");
+$workspace_purchases_cash->execute([$branch_id, $selected_date]);
+$workspace_purchases_cash = $workspace_purchases_cash->fetchColumn();
+
+// ============================================
+// CASH ADVANCES GIVEN TO SUPPLIERS (Initial + Top-ups)
+// ============================================
+
+$advances_given = $pdo->prepare("
+    SELECT COALESCE(SUM(advance_amount), 0) as total
+    FROM purchase_orders
+    WHERE branch_id = ? AND po_type = 'advance' AND order_date = ? AND status != 'cancelled'
+");
+$advances_given->execute([$branch_id, $selected_date]);
+$advances_given = $advances_given->fetchColumn();
+
+$topups_given = $pdo->prepare("
+    SELECT COALESCE(SUM(t.amount), 0) as total
+    FROM po_topups t
+    JOIN purchase_orders po ON t.po_id = po.id
+    WHERE po.branch_id = ? AND DATE(t.created_at) = ?
+");
+$topups_given->execute([$branch_id, $selected_date]);
+$topups_given = $topups_given->fetchColumn();
+
+$cash_advances_given = $advances_given + $topups_given;
+
+// ============================================
 // WORKSPACE PRODUCTION COSTS (Only branch money affects EOD)
 // ============================================
 
@@ -132,29 +189,6 @@ $payments_made_cash->execute([$branch_id, $selected_date]);
 $payments_made_cash = $payments_made_cash->fetchColumn();
 
 // ============================================
-// CASH ADVANCES GIVEN TO SUPPLIERS
-// ============================================
-
-$advances_given = $pdo->prepare("
-    SELECT COALESCE(SUM(advance_amount), 0) as total
-    FROM purchase_orders
-    WHERE branch_id = ? AND po_type = 'advance' AND order_date = ? AND status != 'cancelled'
-");
-$advances_given->execute([$branch_id, $selected_date]);
-$advances_given = $advances_given->fetchColumn();
-
-$topups_given = $pdo->prepare("
-    SELECT COALESCE(SUM(t.amount), 0) as total
-    FROM po_topups t
-    JOIN purchase_orders po ON t.po_id = po.id
-    WHERE po.branch_id = ? AND DATE(t.created_at) = ?
-");
-$topups_given->execute([$branch_id, $selected_date]);
-$topups_given = $topups_given->fetchColumn();
-
-$cash_advances_given = $advances_given + $topups_given;
-
-// ============================================
 // CHECK IF EOD ALREADY RECORDED
 // ============================================
 
@@ -180,12 +214,20 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['save_eod'])) {
     $is_edit_save = $is_admin && isset($_POST['is_edit']) && $_POST['is_edit'] == '1';
 
     // Expected Cash:
-    // Sales cash + customer cash payments - cash expenses - supplier cash payments - cash advances - workspace branch cash costs
+    // Sales cash + customer cash payments 
+    // - cash expenses 
+    // - supplier cash payments 
+    // - cash advances (initial + top-ups) 
+    // - regular purchases (NOT advance PO deliveries)
+    // - workspace new purchases (source = 'purchase')
+    // - workspace branch cash costs
     $expected_cash = $sales_summary['total_cash']
                    + $payments_received_cash
                    - $cash_expenses
                    - $payments_made_cash
                    - $cash_advances_given
+                   - $purchases_cash
+                   - $workspace_purchases_cash
                    - $workspace_costs_cash;
     
     // Expected MOMO:
@@ -345,12 +387,28 @@ TODAY'S SUMMARY
     </div>
     <div class="col-md-3 col-6">
         <div class="stat-card text-center">
-            <p class="stat-label">Total Expenses</p>
-            <h4 class="text-danger"><?php echo number_format($expenses_total + $workspace_costs_total, 0); ?></h4>
+            <p class="stat-label">Cash Outflows</p>
+            <h4 class="text-danger">
+                <?php 
+                $total_outflows = $cash_expenses 
+                                + $payments_made_cash 
+                                + $cash_advances_given 
+                                + $purchases_cash 
+                                + $workspace_purchases_cash 
+                                + $workspace_costs_cash;
+                echo number_format($total_outflows, 0); 
+                ?>
+            </h4>
             <small>
-                Branch: <?php echo number_format($expenses_total, 0); ?> 
-                <?php if($workspace_costs_total > 0): ?>
-                | Workspace: <?php echo number_format($workspace_costs_total, 0); ?>
+                Expenses: <?php echo number_format($cash_expenses, 0); ?>
+                <?php if($purchases_cash > 0): ?>
+                | Stock In: <?php echo number_format($purchases_cash, 0); ?>
+                <?php endif; ?>
+                <?php if($workspace_purchases_cash > 0): ?>
+                | Workspace Purchases: <?php echo number_format($workspace_purchases_cash, 0); ?>
+                <?php endif; ?>
+                <?php if($cash_advances_given > 0): ?>
+                | Advances: <?php echo number_format($cash_advances_given, 0); ?>
                 <?php endif; ?>
             </small>
         </div>
@@ -374,6 +432,8 @@ EOD FORM
                             - $cash_expenses
                             - $payments_made_cash
                             - $cash_advances_given
+                            - $purchases_cash
+                            - $workspace_purchases_cash
                             - $workspace_costs_cash;
         
         $calc_expected_momo = $sales_summary['total_momo'] + $payments_received_momo;
@@ -390,15 +450,22 @@ EOD FORM
                         <strong>Expected Cash:</strong> <?php echo number_format($calc_expected_cash, 0); ?> RWF
                         <br>
                         <small>
-                            Sales cash (<?php echo number_format($sales_summary['total_cash'],0); ?>)
-                            + customer cash payments (<?php echo number_format($payments_received_cash,0); ?>)
-                            − cash expenses (<?php echo number_format($cash_expenses,0); ?>)
-                            − supplier cash payments (<?php echo number_format($payments_made_cash,0); ?>)
-                            − advances/top-ups (<?php echo number_format($cash_advances_given,0); ?>)
+                            + Sales cash (<?php echo number_format($sales_summary['total_cash'],0); ?>)
+                            <br>+ Customer cash payments (<?php echo number_format($payments_received_cash,0); ?>)
+                            <br>− Cash expenses (<?php echo number_format($cash_expenses,0); ?>)
+                            <br>− Supplier cash payments (<?php echo number_format($payments_made_cash,0); ?>)
+                            <br>− Advances/top-ups (<?php echo number_format($cash_advances_given,0); ?>)
+                            <?php if($purchases_cash > 0): ?>
+                            <br>− Regular Stock In (<?php echo number_format($purchases_cash,0); ?>)
+                            <?php endif; ?>
+                            <?php if($workspace_purchases_cash > 0): ?>
+                            <br>− Workspace Purchases (<?php echo number_format($workspace_purchases_cash,0); ?>)
+                            <?php endif; ?>
                             <?php if($workspace_costs_cash > 0): ?>
-                            − workspace costs (<?php echo number_format($workspace_costs_cash,0); ?>)
+                            <br>− Workspace costs (<?php echo number_format($workspace_costs_cash,0); ?>)
                             <?php endif; ?>
                         </small>
+                        <br><small class="text-muted"><i class="fas fa-info-circle"></i> Workspace inputs from "Existing Stock" are NOT deducted (already paid for). Only "New Purchase" is deducted.</small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Actual Cash Count (RWF) *</label>
@@ -412,8 +479,8 @@ EOD FORM
                         <strong>Expected Mobile Money:</strong> <?php echo number_format($calc_expected_momo, 0); ?> RWF
                         <br>
                         <small>
-                            MOMO from sales (<?php echo number_format($sales_summary['total_momo'],0); ?>)
-                            + customer MOMO payments (<?php echo number_format($payments_received_momo,0); ?>)
+                            + MOMO from sales (<?php echo number_format($sales_summary['total_momo'],0); ?>)
+                            <br>+ Customer MOMO payments (<?php echo number_format($payments_received_momo,0); ?>)
                         </small>
                     </div>
                     <div class="mb-3">

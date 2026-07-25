@@ -592,7 +592,7 @@ REST OF THE HTML - UNCHANGED
                                 <input type="number" id="po_qty" class="form-control" placeholder="Qty" min="1" value="1">
                             </div>
                             <div class="col-md-3">
-                                <input type="number" id="po_unit_price" class="form-control" placeholder="Unit Price" step="100" min="0">
+                                <input type="number" id="po_unit_price" class="form-control" placeholder="Unit Price" min="0">
                             </div>
                             <div class="col-md-2">
                                 <button type="button" class="btn btn-secondary w-100" onclick="addPOItem()">
@@ -642,7 +642,7 @@ REST OF THE HTML - UNCHANGED
                         <div class="col-md-6">
                             <label class="form-label">Advance Amount (RWF) *</label>
                             <input type="number" name="advance_amount" id="advance_amount" class="form-control"
-                                   min="0" step="100" placeholder="e.g., 50000">
+                                   min="0" placeholder="e.g., 50000">
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Purpose / Notes</label>
@@ -866,7 +866,7 @@ REST OF THE HTML - UNCHANGED
                                 <input type="number" id="deliver_qty" class="form-control" placeholder="Qty" min="1">
                             </div>
                             <div class="col-md-3">
-                                <input type="number" id="deliver_price" class="form-control" placeholder="Unit Value" step="100" min="0">
+                                <input type="number" id="deliver_price" class="form-control" placeholder="Unit Value" min="0">
                             </div>
                             <div class="col-md-1">
                                 <button type="button" class="btn btn-secondary w-100" onclick="addDeliveryItem()"><i class="fas fa-plus"></i></button>
@@ -1034,7 +1034,7 @@ function renderPOCart() {
                            onchange="updatePOQty(${index}, this.value)">
                 </td>
                 <td>
-                    <input type="number" min="0" step="100" value="${item.unit_price}"
+                    <input type="number" min="0" step="any" value="${item.unit_price}"
                            class="form-control form-control-sm" style="width:120px;"
                            onchange="updatePOPrice(${index}, this.value)">
                 </td>
@@ -1160,7 +1160,7 @@ function renderDeliveryCart() {
                        style="width:80px" onchange="updateDeliveryQty(${idx}, this.value)">
             </td>
             <td>
-                <input type="number" min="0" step="100" value="${item.unit_price}" class="form-control form-control-sm"
+                <input type="number" min="0" step="any" value="${item.unit_price}" class="form-control form-control-sm"
                        style="width:120px" onchange="updateDeliveryPrice(${idx}, this.value)">
             </td>
             <td>${formatNumber(sub)}</td>

@@ -467,7 +467,7 @@ include '../includes/sidebar.php';
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Unit Price (RWF) *</label>
-                        <input type="number" name="unit_price" class="form-control" required min="0" step="100" placeholder="8500">
+                        <input type="number" name="unit_price" class="form-control" required min="0" placeholder="8500">
                     </div>
                     
                     <!-- ===== UPDATED: Supplier Dropdown with "Add New" option ===== -->
@@ -665,7 +665,7 @@ include '../includes/sidebar.php';
                                 <input type="number" id="po_qty" class="form-control" placeholder="Qty" min="1" value="1">
                             </div>
                             <div class="col-md-3">
-                                <input type="number" id="po_unit_price" class="form-control" placeholder="Unit Price" step="100" min="0">
+                                <input type="number" id="po_unit_price" class="form-control" placeholder="Unit Price" min="0">
                             </div>
                             <div class="col-md-2">
                                 <button type="button" class="btn btn-secondary w-100" onclick="addPOItem()">
@@ -711,7 +711,7 @@ include '../includes/sidebar.php';
                     <div class="row g-3">
                         <div class="col-md-6">
                             <label class="form-label">Advance Amount (RWF) *</label>
-                            <input type="number" name="advance_amount" class="form-control" min="0" step="100" placeholder="50000">
+                            <input type="number" name="advance_amount" class="form-control" min="0" placeholder="50000">
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Notes</label>
@@ -911,7 +911,7 @@ function renderPOCart() {
             <tr>
                 <td><strong>${escapeHtml(item.name)}</strong></td>
                 <td><input type="number" min="1" value="${item.quantity}" class="form-control form-control-sm" style="width:80px;" onchange="updatePOQty(${index}, this.value)"></td>
-                <td><input type="number" min="0" step="100" value="${item.unit_price}" class="form-control form-control-sm" style="width:120px;" onchange="updatePOPrice(${index}, this.value)"></td>
+                <td><input type="number" min="0" value="${item.unit_price}" class="form-control form-control-sm" style="width:120px;" onchange="updatePOPrice(${index}, this.value)"></td>
                 <td><strong>${formatNumber(subtotal)}</strong></td>
                 <td><button type="button" class="btn btn-sm btn-danger" onclick="removePOItem(${index})"><i class="fas fa-times"></i></button></td>
             </tr>

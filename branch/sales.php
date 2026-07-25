@@ -334,7 +334,7 @@ include '../includes/sidebar.php';
                             <div class="col-md-4">
                                 <label class="form-label">Discount (RWF)</label>
                                 <input type="number" name="discount" id="discount" class="form-control" 
-                                       value="0" min="0" step="100" oninput="updateTotals()">
+                                       value="0" min="0" oninput="updateTotals()">
                             </div>
                             <div class="col-md-3">
                                 <label class="form-label">Payment Method</label>
@@ -373,7 +373,7 @@ include '../includes/sidebar.php';
                                 </div>
                                 <div class="col-md-3">
                                     <input type="number" id="custom_price_input" class="form-control" 
-                                           placeholder="Premium Price" step="100" min="0">
+                                           placeholder="Premium Price" min="0">
                                 </div>
                                 <div class="col-md-2">
                                     <button type="button" class="btn btn-secondary w-100" onclick="addItem()">
@@ -428,12 +428,12 @@ include '../includes/sidebar.php';
                             <div class="col-md-6">
                                 <label class="form-label">Cash Amount (RWF)</label>
                                 <input type="number" name="cash_amount" id="cash_amount" class="form-control" 
-                                       value="0" min="0" step="100" oninput="updateTotals()">
+                                       value="0" min="0" oninput="updateTotals()">
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">Mobile Money (RWF)</label>
                                 <input type="number" name="momo_amount" id="momo_amount" class="form-control" 
-                                       value="0" min="0" step="100" oninput="updateTotals()">
+                                       value="0" min="0" oninput="updateTotals()">
                             </div>
                         </div>
                         
@@ -651,7 +651,7 @@ function renderCart() {
                            onchange="updateQty(${index}, this.value)">
                 </td>
                 <td>
-                    <input type="number" min="0" step="100" value="${item.price.toFixed(0)}" 
+                    <input type="number" min="0" value="${item.price.toFixed(0)}" 
                            class="form-control form-control-sm" 
                            style="font-weight:600; text-align:center;"
                            onchange="updatePrice(${index}, this.value)">

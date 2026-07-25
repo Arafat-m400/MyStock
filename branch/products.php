@@ -386,14 +386,14 @@ include '../includes/sidebar.php';
                             <div class="col-md-6">
                                 <div class="mb-2">
                                     <label class="form-label">Cost Price (RWF)</label>
-                                    <input type="number" step="0.01" name="cost_price" class="form-control"
+                                    <input type="number" step="any" name="cost_price" class="form-control"
                                            value="<?php echo $edit_product['cost_price'] ?? 0; ?>" min="0">
                                 </div>
                             </div>
                             <div class="col-md-6">
                                 <div class="mb-2">
                                     <label class="form-label">Selling Price (RWF)</label>
-                                    <input type="number" step="0.01" name="selling_price" class="form-control"
+                                    <input type="number" step="any" name="selling_price" class="form-control"
                                            value="<?php echo $edit_product['selling_price'] ?? 0; ?>" min="0">
                                 </div>
                             </div>

@@ -198,7 +198,7 @@ ADD STOCK FORM
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Unit Price (RWF) *</label>
-                            <input type="number" name="unit_price" class="form-control" required min="0" step="100" placeholder="e.g., 8500">
+                            <input type="number" name="unit_price" class="form-control" required min="0" placeholder="e.g., 8500">
                         </div>
                     </div>
                     

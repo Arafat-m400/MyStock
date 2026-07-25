@@ -21,17 +21,17 @@
             <i class="fas fa-truck me-2"></i>Stock In
         </a>
         
+        <div class="nav-section">Production</div>
+        <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'workspaces.php' ? 'active' : ''; ?>" href="/MyStock/branch/workspaces.php">
+            <i class="fas fa-industry me-2"></i>Workspace
+        </a>
+        
         <div class="nav-section">Financial</div>
         <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'expenses.php' ? 'active' : ''; ?>" href="/MyStock/branch/expenses.php">
             <i class="fas fa-money-bill-wave me-2"></i>Expenses
         </a>
         <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'debts.php' ? 'active' : ''; ?>" href="/MyStock/branch/debts.php">
             <i class="fas fa-hand-holding-usd me-2"></i>Debts
-        </a>
-        
-        <div class="nav-section">People</div>
-        <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'people.php' ? 'active' : ''; ?>" href="/MyStock/branch/people.php">
-            <i class="fas fa-users me-2"></i>People
         </a>
         
         <div class="nav-section">Reports</div>

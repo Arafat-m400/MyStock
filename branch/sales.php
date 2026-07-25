@@ -47,7 +47,34 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_sale'])) {
     try {
         $pdo->beginTransaction();
         
-        $customer_id = $_POST['customer_id'] ?: null;
+        // === START: New Customer Handling for Debt ===
+        $customer_id = $_POST['customer_id'] ?? null;
+        
+        // If "new" customer selected, create it
+        if ($customer_id == 'new') {
+            $new_name = sanitize($_POST['new_customer_name']);
+            $new_phone = sanitize($_POST['new_customer_phone']);
+            $new_email = sanitize($_POST['new_customer_email']);
+            $new_address = sanitize($_POST['new_customer_address']);
+            
+            if (empty($new_name)) {
+                throw new Exception("Customer name is required when adding a new customer.");
+            }
+            
+            $stmt = $pdo->prepare("
+                INSERT INTO customers (branch_id, name, phone, email, address) 
+                VALUES (?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([$branch_id, $new_name, $new_phone, $new_email, $new_address]);
+            $customer_id = $pdo->lastInsertId();
+            
+            // Refresh customers list
+            $customers = $pdo->prepare("SELECT id, name, phone FROM customers WHERE branch_id = ? ORDER BY name");
+            $customers->execute([$branch_id]);
+            $customers = $customers->fetchAll();
+        }
+        // === END: New Customer Handling ===
+        
         $discount = floatval($_POST['discount'] ?? 0);
         $payment_method = $_POST['payment_method'] ?? 'cash';
         $items = json_decode($_POST['items_json'], true);
@@ -200,12 +227,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_sale'])) {
             'debt' => '📝 Debt'
         ][$payment_method] ?? $payment_method;
         
-        // FIX: alert-permanent removed so this now auto-dismisses like any
-        // other alert (footer.php skips alert-permanent elements). The
-        // invoice link + New Sale button were also dropped — every sale
-        // already shows up with its own invoice link in the Sales History
-        // table right below, so this was a duplicate that only mattered
-        // while the alert was still on screen.
         $message = '<div class="alert alert-success">
             <i class="fas fa-check-circle me-2"></i>
             <strong>✅ Sale Completed!</strong>
@@ -266,10 +287,12 @@ include '../includes/sidebar.php';
                 <div class="card-body">
                     <form id="saleForm" method="POST" onsubmit="return prepareSubmit()">
                         <div class="row g-2 mb-3">
+                            <!-- ===== UPDATED: Customer Dropdown with "Add New" option ===== -->
                             <div class="col-md-5">
                                 <label class="form-label">Customer</label>
-                                <select name="customer_id" id="customer_id" class="form-select">
+                                <select name="customer_id" id="customer_id" class="form-select" onchange="toggleNewCustomer(this.value)">
                                     <option value="">Walk-in Customer</option>
+                                    <option value="new">+ Add New Customer</option>
                                     <?php foreach($customers as $c): ?>
                                     <option value="<?php echo $c['id']; ?>">
                                         <?php echo htmlspecialchars($c['name']); ?>
@@ -277,6 +300,33 @@ include '../includes/sidebar.php';
                                     <?php endforeach; ?>
                                 </select>
                             </div>
+                            
+                            <!-- ===== NEW: New Customer Fields (hidden by default) ===== -->
+                            <div id="new_customer_fields" style="display:none;" class="col-12">
+                                <div class="p-3 bg-light rounded border">
+                                    <h6 class="mb-2"><i class="fas fa-user-plus me-1"></i> New Customer Details</h6>
+                                    <div class="row g-2">
+                                        <div class="col-md-4">
+                                            <label class="form-label">Customer Name *</label>
+                                            <input type="text" name="new_customer_name" class="form-control" placeholder="e.g., John Doe">
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">Phone</label>
+                                            <input type="text" name="new_customer_phone" class="form-control" placeholder="078XXXXXXX">
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">Email</label>
+                                            <input type="email" name="new_customer_email" class="form-control" placeholder="email@example.com">
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label">Address</label>
+                                            <input type="text" name="new_customer_address" class="form-control" placeholder="Address">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- ===== END NEW ===== -->
+                            
                             <div class="col-md-4">
                                 <label class="form-label">Discount (RWF)</label>
                                 <input type="number" name="discount" id="discount" class="form-control" 
@@ -476,6 +526,26 @@ include '../includes/sidebar.php';
 <script>
 let cart = [];
 let selectedProduct = null;
+
+// ============================================
+// TOGGLE NEW CUSTOMER FIELDS
+// ============================================
+function toggleNewCustomer(value) {
+    const fields = document.getElementById('new_customer_fields');
+    if (value === 'new') {
+        fields.style.display = 'block';
+        document.querySelectorAll('#new_customer_fields input').forEach(input => {
+            if (input.name === 'new_customer_name') {
+                input.setAttribute('required', 'required');
+            }
+        });
+    } else {
+        fields.style.display = 'none';
+        document.querySelectorAll('#new_customer_fields input').forEach(input => {
+            input.removeAttribute('required');
+        });
+    }
+}
 
 function onProductSelect(select) {
     const option = select.options[select.selectedIndex];
@@ -684,10 +754,18 @@ function prepareSubmit() {
             return false;
         }
     } else {
-        // For debt, ensure customer is selected
+        // For debt, ensure customer is selected (could be existing or new)
         const customerId = document.getElementById('customer_id').value;
-        if (!customerId) {
-            alert('⚠️ Please select a customer for debt sale.');
+        
+        // If "new" is selected, check if fields are filled
+        if (customerId === 'new') {
+            const newName = document.querySelector('input[name="new_customer_name"]').value.trim();
+            if (!newName) {
+                alert('⚠️ Please enter the customer name for this debt sale.');
+                return false;
+            }
+        } else if (!customerId) {
+            alert('⚠️ Please select a customer or add a new one for debt sale.');
             return false;
         }
         

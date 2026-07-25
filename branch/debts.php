@@ -11,7 +11,6 @@ $active_tab = $_GET['tab'] ?? 'customer';
 // ============================================
 // RECORD CUSTOMER DEBT PAYMENT
 // ============================================
-
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['pay_customer_debt'])) {
     $debt_id = $_POST['debt_id'];
     $amount = floatval($_POST['payment_amount']);

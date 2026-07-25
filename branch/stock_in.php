@@ -25,8 +25,44 @@ $suppliers = $suppliers->fetchAll();
 // ============================================
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['quick_add'])) {
+    // === START: New Supplier Handling ===
+    $supplier_id = $_POST['supplier_id'] ?? null;
+    
+    // If "new" supplier selected, create it
+    if ($supplier_id == 'new') {
+        $new_name = sanitize($_POST['new_supplier_name']);
+        $new_phone = sanitize($_POST['new_supplier_phone']);
+        $new_whatsapp = sanitize($_POST['new_supplier_whatsapp']);
+        $new_email = sanitize($_POST['new_supplier_email']);
+        
+        try {
+            if (empty($new_name)) {
+                throw new Exception("Supplier name is required when adding a new supplier.");
+            }
+            
+            $stmt = $pdo->prepare("
+                INSERT INTO suppliers (branch_id, name, phone, whatsapp, email) 
+                VALUES (?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([$branch_id, $new_name, $new_phone, $new_whatsapp, $new_email]);
+            $supplier_id = $pdo->lastInsertId();
+            
+            // Refresh suppliers list for the page
+            $suppliers = $pdo->prepare("SELECT id, name, phone, whatsapp FROM suppliers WHERE branch_id = ? ORDER BY name");
+            $suppliers->execute([$branch_id]);
+            $suppliers = $suppliers->fetchAll();
+            
+        } catch (Exception $e) {
+            $message = '<div class="alert alert-danger">❌ Error adding supplier: ' . htmlspecialchars($e->getMessage()) . '</div>';
+            // Don't proceed with stock addition if supplier creation failed
+            $supplier_id = null;
+        }
+    }
+    // === END: New Supplier Handling ===
+    
+    // === YOUR ORIGINAL CODE - UNCHANGED ===
     $product_id = $_POST['product_id'];
-    $supplier_id = $_POST['supplier_id'] ?: null;
+    // $supplier_id is now handled above instead of $_POST['supplier_id'] ?: null
     $quantity = intval($_POST['quantity']);
     $unit_price = floatval($_POST['unit_price']);
     $purchase_date = $_POST['purchase_date'] ?? date('Y-m-d');
@@ -241,8 +277,36 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['create_po'])) {
     try {
         $pdo->beginTransaction();
         
-        $po_type = $_POST['po_type'];
+        // === START: New Supplier Handling for PO ===
         $supplier_id = $_POST['supplier_id'];
+        
+        // If "new" supplier selected, create it
+        if ($supplier_id == 'new') {
+            $new_name = sanitize($_POST['po_new_supplier_name']);
+            $new_phone = sanitize($_POST['po_new_supplier_phone']);
+            $new_whatsapp = sanitize($_POST['po_new_supplier_whatsapp']);
+            $new_email = sanitize($_POST['po_new_supplier_email']);
+            
+            if (empty($new_name)) {
+                throw new Exception("Supplier name is required when adding a new supplier.");
+            }
+            
+            $stmt = $pdo->prepare("
+                INSERT INTO suppliers (branch_id, name, phone, whatsapp, email) 
+                VALUES (?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([$branch_id, $new_name, $new_phone, $new_whatsapp, $new_email]);
+            $supplier_id = $pdo->lastInsertId();
+            
+            // Refresh suppliers list
+            $suppliers = $pdo->prepare("SELECT id, name, phone, whatsapp FROM suppliers WHERE branch_id = ? ORDER BY name");
+            $suppliers->execute([$branch_id]);
+            $suppliers = $suppliers->fetchAll();
+        }
+        // === END: New Supplier Handling for PO ===
+        
+        $po_type = $_POST['po_type'];
+        // $supplier_id is now handled above
         $order_date = $_POST['order_date'];
         $expected_delivery = $_POST['expected_delivery'] ?: null;
         $notes = $_POST['notes'];
@@ -398,15 +462,45 @@ include '../includes/sidebar.php';
                         <label class="form-label">Unit Price (RWF) *</label>
                         <input type="number" name="unit_price" class="form-control" required min="0" step="100" placeholder="8500">
                     </div>
+                    
+                    <!-- ===== UPDATED: Supplier Dropdown with "Add New" option ===== -->
                     <div class="col-md-3">
                         <label class="form-label">Supplier</label>
-                        <select name="supplier_id" class="form-select">
+                        <select name="supplier_id" id="supplier_select" class="form-select" onchange="toggleNewSupplier(this.value)">
                             <option value="">-- None --</option>
+                            <option value="new">+ Add New Supplier</option>
                             <?php foreach($suppliers as $s): ?>
                             <option value="<?php echo $s['id']; ?>"><?php echo htmlspecialchars($s['name']); ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
+                    
+                    <!-- ===== NEW: New Supplier Fields (hidden by default) ===== -->
+                    <div id="new_supplier_fields" style="display:none;" class="col-12">
+                        <div class="p-3 bg-light rounded border">
+                            <h6 class="mb-2"><i class="fas fa-building me-1"></i> New Supplier Details</h6>
+                            <div class="row g-2">
+                                <div class="col-md-4">
+                                    <label class="form-label">Supplier Name *</label>
+                                    <input type="text" name="new_supplier_name" class="form-control" placeholder="e.g., Arafat Supplies">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Phone</label>
+                                    <input type="text" name="new_supplier_phone" class="form-control" placeholder="078XXXXXXX">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">WhatsApp</label>
+                                    <input type="text" name="new_supplier_whatsapp" class="form-control" placeholder="250XXXXXXXXX">
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label">Email</label>
+                                    <input type="email" name="new_supplier_email" class="form-control" placeholder="email@example.com">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- ===== END NEW ===== -->
+                    
                     <div class="col-md-4">
                         <label class="form-label">Purchase Date</label>
                         <input type="date" name="purchase_date" class="form-control" value="<?php echo date('Y-m-d'); ?>">
@@ -490,10 +584,13 @@ include '../includes/sidebar.php';
                             <option value="advance">💰 Cash Advance</option>
                         </select>
                     </div>
+                    
+                    <!-- ===== UPDATED: Supplier Dropdown with "Add New" option ===== -->
                     <div class="col-md-3">
                         <label class="form-label">Supplier *</label>
-                        <select name="supplier_id" class="form-select" required>
+                        <select name="supplier_id" id="po_supplier_select" class="form-select" required onchange="togglePONewSupplier(this.value)">
                             <option value="">-- Select Supplier --</option>
+                            <option value="new">+ Add New Supplier</option>
                             <?php foreach($suppliers as $s): ?>
                             <option value="<?php echo $s['id']; ?>">
                                 <?php echo htmlspecialchars($s['name']); ?>
@@ -501,6 +598,33 @@ include '../includes/sidebar.php';
                             <?php endforeach; ?>
                         </select>
                     </div>
+                    
+                    <!-- ===== NEW: New Supplier Fields for PO (hidden by default) ===== -->
+                    <div id="po_new_supplier_fields" style="display:none;" class="col-12">
+                        <div class="p-3 bg-light rounded border">
+                            <h6 class="mb-2"><i class="fas fa-building me-1"></i> New Supplier Details</h6>
+                            <div class="row g-2">
+                                <div class="col-md-4">
+                                    <label class="form-label">Supplier Name *</label>
+                                    <input type="text" name="po_new_supplier_name" class="form-control" placeholder="e.g., Arafat Supplies">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Phone</label>
+                                    <input type="text" name="po_new_supplier_phone" class="form-control" placeholder="078XXXXXXX">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">WhatsApp</label>
+                                    <input type="text" name="po_new_supplier_whatsapp" class="form-control" placeholder="250XXXXXXXXX">
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label">Email</label>
+                                    <input type="email" name="po_new_supplier_email" class="form-control" placeholder="email@example.com">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- ===== END NEW ===== -->
+                    
                     <div class="col-md-3">
                         <label class="form-label">Order Date</label>
                         <input type="date" name="order_date" class="form-control" value="<?php echo date('Y-m-d'); ?>">
@@ -660,11 +784,49 @@ include '../includes/sidebar.php';
     <?php endif; ?>
 </div>
 
-
-
 <script>
 let poCart = [];
 let poSelectedProduct = null;
+
+// ============================================
+// TOGGLE NEW SUPPLIER FIELDS (Quick Add)
+// ============================================
+function toggleNewSupplier(value) {
+    const fields = document.getElementById('new_supplier_fields');
+    if (value === 'new') {
+        fields.style.display = 'block';
+        document.querySelectorAll('#new_supplier_fields input').forEach(input => {
+            if (input.name === 'new_supplier_name') {
+                input.setAttribute('required', 'required');
+            }
+        });
+    } else {
+        fields.style.display = 'none';
+        document.querySelectorAll('#new_supplier_fields input').forEach(input => {
+            input.removeAttribute('required');
+        });
+    }
+}
+
+// ============================================
+// TOGGLE NEW SUPPLIER FIELDS (PO)
+// ============================================
+function togglePONewSupplier(value) {
+    const fields = document.getElementById('po_new_supplier_fields');
+    if (value === 'new') {
+        fields.style.display = 'block';
+        document.querySelectorAll('#po_new_supplier_fields input').forEach(input => {
+            if (input.name === 'po_new_supplier_name') {
+                input.setAttribute('required', 'required');
+            }
+        });
+    } else {
+        fields.style.display = 'none';
+        document.querySelectorAll('#po_new_supplier_fields input').forEach(input => {
+            input.removeAttribute('required');
+        });
+    }
+}
 
 function togglePOType() {
     const type = document.getElementById('po_type').value;

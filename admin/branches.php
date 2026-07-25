@@ -56,22 +56,41 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['edit_branch'])) {
     }
 }
 
-// Delete Branch
+// Delete Branch - Updated with user cleanup
 if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $id = $_GET['delete'];
     
     // Check if branch has data
     $check = $pdo->prepare("SELECT COUNT(*) FROM products WHERE branch_id = ?");
     $check->execute([$id]);
-    $count = $check->fetchColumn();
+    $product_count = $check->fetchColumn();
     
-    if ($count > 0) {
-        $message = '<div class="alert alert-warning">⚠️ Cannot delete: Branch has ' . $count . ' products. Reassign or delete them first.</div>';
+    $check2 = $pdo->prepare("SELECT COUNT(*) FROM sales WHERE branch_id = ?");
+    $check2->execute([$id]);
+    $sale_count = $check2->fetchColumn();
+    
+    if ($product_count > 0 || $sale_count > 0) {
+        $message = '<div class="alert alert-warning">⚠️ Cannot delete: Branch has ' . $product_count . ' products and ' . $sale_count . ' sales records.</div>';
     } else {
-        $stmt = $pdo->prepare("DELETE FROM branches WHERE id = ?");
-        $stmt->execute([$id]);
-        $message = '<div class="alert alert-success">✅ Branch deleted!</div>';
-        logAction($pdo, 'Delete Branch', "Deleted branch ID: $id");
+        try {
+            $pdo->beginTransaction();
+            
+            // Remove user-branch assignments first
+            $pdo->prepare("DELETE FROM user_branches WHERE branch_id = ?")->execute([$id]);
+            
+            // Delete expenses
+            $pdo->prepare("DELETE FROM expenses WHERE branch_id = ?")->execute([$id]);
+            
+            // Delete the branch
+            $pdo->prepare("DELETE FROM branches WHERE id = ?")->execute([$id]);
+            
+            $pdo->commit();
+            $message = '<div class="alert alert-success">✅ Branch deleted successfully!</div>';
+            logAction($pdo, 'Delete Branch', "Deleted branch ID: $id");
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            $message = '<div class="alert alert-danger">❌ Error: ' . $e->getMessage() . '</div>';
+        }
     }
 }
 

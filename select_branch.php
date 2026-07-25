@@ -4,9 +4,19 @@ requireLogin();
 
 $branch_id = $_GET['id'] ?? 0;
 
-// Verify user has access to this branch
-if (!hasBranchAccess($branch_id)) {
-    redirect('index.php');
+// Admin can access any branch
+if (isAdmin()) {
+    // Verify branch exists
+    $stmt = $pdo->prepare("SELECT id FROM branches WHERE id = ?");
+    $stmt->execute([$branch_id]);
+    if (!$stmt->fetch()) {
+        redirect('index.php');
+    }
+} else {
+    // Non-admin must have access
+    if (!hasBranchAccess($branch_id)) {
+        redirect('index.php');
+    }
 }
 
 // Set branch in session

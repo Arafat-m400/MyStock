@@ -91,11 +91,12 @@ function hasBranchAccess($branch_id) {
 // ============================================
 
 function getUserBranches($pdo, $user_id) {
+    // Admin gets ALL branches (for management view)
     $stmt = $pdo->prepare("
         SELECT b.*, ub.role 
         FROM branches b
         JOIN user_branches ub ON ub.branch_id = b.id
-        WHERE ub.user_id = ? AND b.status = 'active'
+        WHERE ub.user_id = ?
         ORDER BY b.name
     ");
     $stmt->execute([$user_id]);

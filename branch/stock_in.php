@@ -58,66 +58,69 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['quick_add'])) {
             $supplier_id = null;
         }
     }
-    // === END: New Supplier Handling ===
     
-    // === YOUR ORIGINAL CODE - UNCHANGED ===
-    $product_id = $_POST['product_id'];
-    // $supplier_id is now handled above instead of $_POST['supplier_id'] ?: null
-    $quantity = intval($_POST['quantity']);
-    $unit_price = floatval($_POST['unit_price']);
-    $purchase_date = $_POST['purchase_date'] ?? date('Y-m-d');
-    $invoice_no = $_POST['invoice_no'] ?: 'PO-' . date('Ymd') . '-' . rand(100, 999);
-    
-    try {
-        $pdo->beginTransaction();
+    // === FIX: Validate that supplier is selected ===
+    if (empty($supplier_id)) {
+        $message = '<div class="alert alert-danger">❌ Please select a supplier or add a new one.</div>';
+    } else {
+        // === YOUR ORIGINAL CODE - UNCHANGED ===
+        $product_id = $_POST['product_id'];
+        $quantity = intval($_POST['quantity']);
+        $unit_price = floatval($_POST['unit_price']);
+        $purchase_date = $_POST['purchase_date'] ?? date('Y-m-d');
+        $invoice_no = $_POST['invoice_no'] ?: 'PO-' . date('Ymd') . '-' . rand(100, 999);
         
-        if ($quantity <= 0) throw new Exception("Quantity must be greater than 0.");
-        if ($unit_price < 0) throw new Exception("Unit price cannot be negative.");
-        
-        // Get current product details
-        $stmt = $pdo->prepare("SELECT * FROM products WHERE id = ? AND branch_id = ?");
-        $stmt->execute([$product_id, $branch_id]);
-        $product = $stmt->fetch();
-        if (!$product) throw new Exception("Product not found.");
-        
-        // Calculate new cost price (weighted average)
-        $current_qty = $product['quantity'];
-        $current_cost = $product['cost_price'];
-        $new_qty = $current_qty + $quantity;
-        $new_cost = (($current_qty * $current_cost) + ($quantity * $unit_price)) / $new_qty;
-        
-        // Insert purchase record
-        $stmt = $pdo->prepare("INSERT INTO purchases (branch_id, supplier_id, invoice_no, purchase_date, total_amount, created_by) VALUES (?, ?, ?, ?, ?, ?)");
-        $total_amount = $quantity * $unit_price;
-        $stmt->execute([$branch_id, $supplier_id, $invoice_no, $purchase_date, $total_amount, $_SESSION['user_id']]);
-        $purchase_id = $pdo->lastInsertId();
-        
-        // Insert purchase items
-        $stmt = $pdo->prepare("INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)");
-        $stmt->execute([$purchase_id, $product_id, $quantity, $unit_price, $total_amount]);
-        
-        // Update product stock and cost
-        $stmt = $pdo->prepare("UPDATE products SET quantity = ?, cost_price = ?, last_purchase_date = ? WHERE id = ?");
-        $stmt->execute([$new_qty, round($new_cost, 2), $purchase_date, $product_id]);
-        
-        // Update supplier total
-        if ($supplier_id) {
-            $pdo->prepare("UPDATE suppliers SET total_purchased = total_purchased + ? WHERE id = ?")->execute([$total_amount, $supplier_id]);
+        try {
+            $pdo->beginTransaction();
+            
+            if ($quantity <= 0) throw new Exception("Quantity must be greater than 0.");
+            if ($unit_price < 0) throw new Exception("Unit price cannot be negative.");
+            
+            // Get current product details
+            $stmt = $pdo->prepare("SELECT * FROM products WHERE id = ? AND branch_id = ?");
+            $stmt->execute([$product_id, $branch_id]);
+            $product = $stmt->fetch();
+            if (!$product) throw new Exception("Product not found.");
+            
+            // Calculate new cost price (weighted average)
+            $current_qty = $product['quantity'];
+            $current_cost = $product['cost_price'];
+            $new_qty = $current_qty + $quantity;
+            $new_cost = (($current_qty * $current_cost) + ($quantity * $unit_price)) / $new_qty;
+            
+            // Insert purchase record
+            $stmt = $pdo->prepare("INSERT INTO purchases (branch_id, supplier_id, invoice_no, purchase_date, total_amount, created_by) VALUES (?, ?, ?, ?, ?, ?)");
+            $total_amount = $quantity * $unit_price;
+            $stmt->execute([$branch_id, $supplier_id, $invoice_no, $purchase_date, $total_amount, $_SESSION['user_id']]);
+            $purchase_id = $pdo->lastInsertId();
+            
+            // Insert purchase items
+            $stmt = $pdo->prepare("INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)");
+            $stmt->execute([$purchase_id, $product_id, $quantity, $unit_price, $total_amount]);
+            
+            // Update product stock and cost
+            $stmt = $pdo->prepare("UPDATE products SET quantity = ?, cost_price = ?, last_purchase_date = ? WHERE id = ?");
+            $stmt->execute([$new_qty, round($new_cost, 2), $purchase_date, $product_id]);
+            
+            // Update supplier total
+            if ($supplier_id) {
+                $pdo->prepare("UPDATE suppliers SET total_purchased = total_purchased + ? WHERE id = ?")->execute([$total_amount, $supplier_id]);
+            }
+            
+            $pdo->commit();
+            
+            logAction($pdo, 'Quick Add Stock', "Added $quantity of {$product['name']}");
+            $message = '<div class="alert alert-success">✅ Stock added! ' . $quantity . ' ' . $product['unit'] . ' of "' . htmlspecialchars($product['name']) . '" added. New stock: ' . $new_qty . ' | Cost: ' . number_format($new_cost, 0) . ' RWF</div>';
+            
+            // Refresh products
+            $products = $pdo->prepare("SELECT id, name, quantity, cost_price, unit FROM products WHERE branch_id = ? ORDER BY name");
+            $products->execute([$branch_id]);
+            $products = $products->fetchAll();
+            
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            $message = '<div class="alert alert-danger">❌ Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
         }
-        
-        $pdo->commit();
-        
-        logAction($pdo, 'Quick Add Stock', "Added $quantity of {$product['name']}");
-        $message = '<div class="alert alert-success">✅ Stock added! ' . $quantity . ' ' . $product['unit'] . ' of "' . htmlspecialchars($product['name']) . '" added. New stock: ' . $new_qty . ' | Cost: ' . number_format($new_cost, 0) . ' RWF</div>';
-        
-        // Refresh products
-        $products = $pdo->prepare("SELECT id, name, quantity, cost_price, unit FROM products WHERE branch_id = ? ORDER BY name");
-        $products->execute([$branch_id]);
-        $products = $products->fetchAll();
-        
-    } catch (Exception $e) {
-        $pdo->rollBack();
-        $message = '<div class="alert alert-danger">❌ Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
     }
 }
 
@@ -280,6 +283,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['create_po'])) {
         // === START: New Supplier Handling for PO ===
         $supplier_id = $_POST['supplier_id'];
         
+        // Validate supplier is selected
+        if (empty($supplier_id)) {
+            throw new Exception("Please select a supplier.");
+        }
+        
         // If "new" supplier selected, create it
         if ($supplier_id == 'new') {
             $new_name = sanitize($_POST['po_new_supplier_name']);
@@ -306,7 +314,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['create_po'])) {
         // === END: New Supplier Handling for PO ===
         
         $po_type = $_POST['po_type'];
-        // $supplier_id is now handled above
         $order_date = $_POST['order_date'];
         $expected_delivery = $_POST['expected_delivery'] ?: null;
         $notes = $_POST['notes'];
@@ -465,9 +472,9 @@ include '../includes/sidebar.php';
                     
                     <!-- ===== UPDATED: Supplier Dropdown with "Add New" option ===== -->
                     <div class="col-md-3">
-                        <label class="form-label">Supplier</label>
-                        <select name="supplier_id" id="supplier_select" class="form-select" onchange="toggleNewSupplier(this.value)">
-                            <option value="">-- None --</option>
+                        <label class="form-label">Supplier *</label>
+                        <select name="supplier_id" id="supplier_select" class="form-select" required onchange="toggleNewSupplier(this.value)">
+                            <option value="">-- Select Supplier --</option>
                             <option value="new">+ Add New Supplier</option>
                             <?php foreach($suppliers as $s): ?>
                             <option value="<?php echo $s['id']; ?>"><?php echo htmlspecialchars($s['name']); ?></option>
@@ -941,7 +948,8 @@ function updatePOTotals() {
 }
 
 function formatNumber(n) {
-    return new Intl.NumberFormat('en-RW').format(Math.round(n));
+    // Return raw number without formatting
+    return Math.round(n);
 }
 
 function escapeHtml(str) {

@@ -80,7 +80,7 @@ $products->execute([$branch_id]);
 $products = $products->fetchAll();
 
 // ============================================
-// ADD INPUT
+// ADD INPUT - UPDATED WITH STOCK REDUCTION
 // ============================================
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_input'])) {
@@ -92,10 +92,25 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_input'])) {
     $notes = sanitize($_POST['notes'] ?? '');
     
     try {
-        // Get product unit
-        $prod = $pdo->prepare("SELECT name, unit FROM products WHERE id = ?");
-        $prod->execute([$product_id]);
+        $pdo->beginTransaction();
+        
+        // Get product details
+        $prod = $pdo->prepare("SELECT name, unit, quantity FROM products WHERE id = ? AND branch_id = ?");
+        $prod->execute([$product_id, $branch_id]);
         $product = $prod->fetch();
+        
+        if (!$product) throw new Exception("Product not found.");
+        
+        // Reduce stock if source is 'existing_stock'
+        if ($source == 'existing_stock') {
+            if ($product['quantity'] < $quantity) {
+                throw new Exception("Insufficient stock! Available: " . $product['quantity'] . " " . $product['unit']);
+            }
+            
+            $new_quantity = $product['quantity'] - $quantity;
+            $pdo->prepare("UPDATE products SET quantity = ? WHERE id = ? AND branch_id = ?")
+                ->execute([$new_quantity, $product_id, $branch_id]);
+        }
         
         $total_cost = $quantity * $unit_cost;
         
@@ -105,7 +120,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_input'])) {
         ");
         $stmt->execute([$workspace_id, $product_id, $quantity, $product['unit'], $unit_cost, $total_cost, $source, $source_reference, $notes]);
         
-        $message = '<div class="alert alert-success">✅ Input added: ' . $quantity . ' ' . $product['unit'] . ' of ' . $product['name'] . '</div>';
+        $pdo->commit();
+        
+        $source_text = $source == 'existing_stock' ? ' (stock reduced)' : '';
+        $message = '<div class="alert alert-success">✅ Input added: ' . $quantity . ' ' . $product['unit'] . ' of ' . $product['name'] . $source_text . '</div>';
         logAction($pdo, 'Workspace Add Input', "Added input to workspace #$workspace_id");
         
         // Refresh data
@@ -114,13 +132,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_input'])) {
         $inputs = $inputs->fetchAll();
         $total_input_cost = array_sum(array_column($inputs, 'total_cost'));
         
-    } catch (PDOException $e) {
-        $message = '<div class="alert alert-danger">❌ Error: ' . $e->getMessage() . '</div>';
+        // Refresh products list
+        $products = $pdo->prepare("SELECT id, name, unit, quantity, cost_price, selling_price FROM products WHERE branch_id = ? ORDER BY name");
+        $products->execute([$branch_id]);
+        $products = $products->fetchAll();
+        
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        $message = '<div class="alert alert-danger">❌ Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
     }
 }
 
 // ============================================
-// ADD COST
+// ADD COST - UPDATED WITH COST SOURCE
 // ============================================
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_cost'])) {
@@ -129,15 +153,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_cost'])) {
     $amount = floatval($_POST['amount']);
     $cost_date = $_POST['cost_date'] ?? date('Y-m-d');
     $payment_method = $_POST['payment_method'] ?? 'cash';
+    $cost_source = $_POST['cost_source'] ?? 'branch';
     
     try {
         $stmt = $pdo->prepare("
-            INSERT INTO workspace_costs (workspace_id, category, description, amount, cost_date, payment_method, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO workspace_costs (workspace_id, category, description, amount, cost_date, payment_method, cost_source, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ");
-        $stmt->execute([$workspace_id, $category, $description, $amount, $cost_date, $payment_method, $_SESSION['user_id']]);
+        $stmt->execute([$workspace_id, $category, $description, $amount, $cost_date, $payment_method, $cost_source, $_SESSION['user_id']]);
         
-        $message = '<div class="alert alert-success">✅ Production cost added: ' . number_format($amount, 0) . ' RWF for ' . ucfirst($category) . '</div>';
+        $source_label = $cost_source == 'branch' ? '🏦 Branch Money' : '💼 External/Boss Money';
+        $message = '<div class="alert alert-success">✅ Production cost added: ' . number_format($amount, 0) . ' RWF for ' . ucfirst($category) . ' (' . $source_label . ')</div>';
         logAction($pdo, 'Workspace Add Cost', "Added cost to workspace #$workspace_id");
         
         // Refresh data
@@ -168,7 +194,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_output'])) {
         $product = $prod->fetch();
         
         // Calculate production cost per unit (total costs / total quantity)
-        // For simplicity, we use the total production cost divided by total output quantity
         $total_output_qty = array_sum(array_column($outputs, 'quantity_produced')) + $quantity_produced;
         $production_cost_per_unit = $total_output_qty > 0 ? $total_production_cost / $total_output_qty : 0;
         $total_production_cost_for_output = $quantity_produced * $production_cost_per_unit;
@@ -466,9 +491,9 @@ include '../includes/sidebar.php';
                     <div class="col-md-2">
                         <label class="form-label">Source</label>
                         <select name="source" class="form-select">
-                            <option value="existing_stock">Existing Stock</option>
-                            <option value="purchase">New Purchase</option>
-                            <option value="transfer">Transfer</option>
+                            <option value="existing_stock">📦 Existing Stock</option>
+                            <option value="purchase">🛒 New Purchase</option>
+                            <option value="transfer">📥 Transfer</option>
                         </select>
                     </div>
                     <div class="col-md-8">
@@ -515,7 +540,15 @@ include '../includes/sidebar.php';
                             <td><?php echo $in['quantity']; ?> <?php echo $in['product_unit']; ?></td>
                             <td><?php echo number_format($in['unit_cost'], 0); ?></td>
                             <td><strong><?php echo number_format($in['total_cost'], 0); ?></strong></td>
-                            <td><span class="badge bg-secondary"><?php echo ucfirst($in['source']); ?></span></td>
+                            <td>
+                                <?php if($in['source'] == 'existing_stock'): ?>
+                                <span class="badge bg-info">📦 Stock</span>
+                                <?php elseif($in['source'] == 'purchase'): ?>
+                                <span class="badge bg-success">🛒 Purchase</span>
+                                <?php else: ?>
+                                <span class="badge bg-secondary">📥 Transfer</span>
+                                <?php endif; ?>
+                            </td>
                             <td><?php echo htmlspecialchars($in['source_reference'] ?? '—'); ?></td>
                         </tr>
                         <?php endforeach; ?>
@@ -535,7 +568,7 @@ include '../includes/sidebar.php';
     <?php endif; ?>
 
     <!-- ============================================
-    COSTS TAB
+    COSTS TAB - UPDATED WITH COST SOURCE
     ============================================ -->
     <?php if($active_tab == 'costs'): ?>
     <!-- Add Cost Form -->
@@ -574,6 +607,22 @@ include '../includes/sidebar.php';
                         <label class="form-label">Date</label>
                         <input type="date" name="cost_date" class="form-control" value="<?php echo date('Y-m-d'); ?>">
                     </div>
+                    
+                    <!-- ============================================
+                    NEW: Cost Source Field
+                    ============================================ -->
+                    <div class="col-md-6">
+                        <label class="form-label">Payment Source *</label>
+                        <select name="cost_source" class="form-select" required>
+                            <option value="branch">🏦 Branch Money (affects EOD)</option>
+                            <option value="external">💼 External/Boss Money</option>
+                        </select>
+                        <small class="text-muted">
+                            <i class="fas fa-info-circle me-1"></i>
+                            Branch money will affect End of Day reports. External money won't.
+                        </small>
+                    </div>
+                    
                     <div class="col-md-6">
                         <label class="form-label">Payment Method</label>
                         <select name="payment_method" class="form-select">
@@ -582,6 +631,7 @@ include '../includes/sidebar.php';
                             <option value="bank_transfer">🏦 Bank Transfer</option>
                         </select>
                     </div>
+                    
                     <div class="col-12">
                         <button type="submit" name="add_cost" class="btn btn-warning text-white">
                             <i class="fas fa-save me-1"></i> Add Cost
@@ -607,15 +657,20 @@ include '../includes/sidebar.php';
                         <th>Date</th>
                         <th>Category</th>
                         <th>Description</th>
+                        <th>Source</th>
                         <th>Method</th>
                         <th style="text-align:right;">Amount</th>
                     </tr></thead>
                     <tbody>
-                        <?php foreach($costs as $c): ?>
+                        <?php foreach($costs as $c): 
+                            $source_badge = $c['cost_source'] == 'branch' ? 'success' : 'secondary';
+                            $source_label = $c['cost_source'] == 'branch' ? '🏦 Branch' : '💼 External';
+                        ?>
                         <tr>
                             <td><?php echo $c['cost_date']; ?></td>
                             <td><span class="badge bg-<?php echo ['labor'=>'primary','electricity'=>'warning','water'=>'info','equipment'=>'secondary','maintenance'=>'dark','transport'=>'success','packaging'=>'info','veterinary'=>'danger','feed'=>'success','rent'=>'primary','other'=>'secondary'][$c['category']] ?? 'secondary'; ?>"><?php echo ucfirst($c['category']); ?></span></td>
                             <td><?php echo htmlspecialchars($c['description'] ?: '—'); ?></td>
+                            <td><span class="badge bg-<?php echo $source_badge; ?>"><?php echo $source_label; ?></span></td>
                             <td><?php echo ucfirst($c['payment_method']); ?></td>
                             <td style="text-align:right;"><strong><?php echo number_format($c['amount'], 0); ?></strong></td>
                         </tr>
@@ -623,7 +678,7 @@ include '../includes/sidebar.php';
                     </tbody>
                     <tfoot>
                         <tr class="table-warning">
-                            <th colspan="4" class="text-end">Total Production Cost:</th>
+                            <th colspan="5" class="text-end">Total Production Cost:</th>
                             <th style="text-align:right;"><strong><?php echo number_format($total_production_cost, 0); ?> RWF</strong></th>
                         </tr>
                     </tfoot>

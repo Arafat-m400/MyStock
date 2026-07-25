@@ -13,13 +13,14 @@ $message = '';
 
 $today = date('Y-m-d');
 
-// FIX: was hardcoded to today only, so a missed day could never be
-// filed. Now accepts ?date=YYYY-MM-DD, capped so you can't file a
-// future day.
+// Accept ?date=YYYY-MM-DD, capped so you can't file a future day
 $selected_date = $_GET['date'] ?? $today;
 if ($selected_date > $today) $selected_date = $today;
 
-// Sales summary for the selected date
+// ============================================
+// SALES SUMMARY
+// ============================================
+
 $sales_summary = $pdo->prepare("
     SELECT 
         COALESCE(SUM(grand_total), 0) as total_sales,
@@ -33,7 +34,10 @@ $sales_summary = $pdo->prepare("
 $sales_summary->execute([$branch_id, $selected_date]);
 $sales_summary = $sales_summary->fetch();
 
-// Total expenses for the selected date (all payment methods - shown as-is)
+// ============================================
+// EXPENSES (Regular Branch Expenses)
+// ============================================
+
 $expenses_total = $pdo->prepare("
     SELECT COALESCE(SUM(amount), 0) as total 
     FROM expenses 
@@ -42,8 +46,7 @@ $expenses_total = $pdo->prepare("
 $expenses_total->execute([$branch_id, $selected_date]);
 $expenses_total = $expenses_total->fetchColumn();
 
-// FIX: only CASH expenses actually reduce the physical cash in the
-// drawer - previously nothing was subtracted from expected cash at all.
+// Only CASH expenses reduce physical cash in the drawer
 $cash_expenses = $pdo->prepare("
     SELECT COALESCE(SUM(amount), 0) as total
     FROM expenses
@@ -52,8 +55,54 @@ $cash_expenses = $pdo->prepare("
 $cash_expenses->execute([$branch_id, $selected_date]);
 $cash_expenses = $cash_expenses->fetchColumn();
 
-// Customer payments received, split by method (only cash affects the drawer,
-// only momo affects the expected momo total)
+// ============================================
+// WORKSPACE PRODUCTION COSTS (Only branch money affects EOD)
+// ============================================
+
+// Total workspace costs (all sources - for display)
+$workspace_costs_total = $pdo->prepare("
+    SELECT COALESCE(SUM(wc.amount), 0) as total
+    FROM workspace_costs wc
+    JOIN workspaces w ON wc.workspace_id = w.id
+    WHERE w.branch_id = ? AND wc.cost_date = ?
+");
+$workspace_costs_total->execute([$branch_id, $selected_date]);
+$workspace_costs_total = $workspace_costs_total->fetchColumn();
+
+// Only BRANCH money workspace costs affect EOD (cost_source = 'branch')
+$workspace_costs_branch = $pdo->prepare("
+    SELECT COALESCE(SUM(wc.amount), 0) as total
+    FROM workspace_costs wc
+    JOIN workspaces w ON wc.workspace_id = w.id
+    WHERE w.branch_id = ? AND wc.cost_date = ? AND wc.cost_source = 'branch'
+");
+$workspace_costs_branch->execute([$branch_id, $selected_date]);
+$workspace_costs_branch = $workspace_costs_branch->fetchColumn();
+
+// Workspace costs from EXTERNAL/BOSS money (does NOT affect EOD)
+$workspace_costs_external = $pdo->prepare("
+    SELECT COALESCE(SUM(wc.amount), 0) as total
+    FROM workspace_costs wc
+    JOIN workspaces w ON wc.workspace_id = w.id
+    WHERE w.branch_id = ? AND wc.cost_date = ? AND wc.cost_source = 'external'
+");
+$workspace_costs_external->execute([$branch_id, $selected_date]);
+$workspace_costs_external = $workspace_costs_external->fetchColumn();
+
+// Cash workspace costs (branch money only)
+$workspace_costs_cash = $pdo->prepare("
+    SELECT COALESCE(SUM(wc.amount), 0) as total
+    FROM workspace_costs wc
+    JOIN workspaces w ON wc.workspace_id = w.id
+    WHERE w.branch_id = ? AND wc.cost_date = ? AND wc.cost_source = 'branch' AND wc.payment_method = 'cash'
+");
+$workspace_costs_cash->execute([$branch_id, $selected_date]);
+$workspace_costs_cash = $workspace_costs_cash->fetchColumn();
+
+// ============================================
+// CUSTOMER DEBT PAYMENTS RECEIVED
+// ============================================
+
 $payments_received_cash = $pdo->prepare("
     SELECT COALESCE(SUM(amount), 0) as total 
     FROM payments 
@@ -70,8 +119,10 @@ $payments_received_momo = $pdo->prepare("
 $payments_received_momo->execute([$branch_id, $selected_date]);
 $payments_received_momo = $payments_received_momo->fetchColumn();
 
-// FIX: supplier debt payments made in CASH also leave the drawer -
-// previously fetched but never actually subtracted from expected cash.
+// ============================================
+// SUPPLIER DEBT PAYMENTS MADE (Cash leaving the drawer)
+// ============================================
+
 $payments_made_cash = $pdo->prepare("
     SELECT COALESCE(SUM(amount), 0) as total 
     FROM payments 
@@ -80,9 +131,10 @@ $payments_made_cash = $pdo->prepare("
 $payments_made_cash->execute([$branch_id, $selected_date]);
 $payments_made_cash = $payments_made_cash->fetchColumn();
 
-// FIX: cash advances given to suppliers/collectors that day (and any
-// same-day top-ups) also leave the drawer, and were never accounted for
-// at all - this alone caused false "shortage" alerts on advance days.
+// ============================================
+// CASH ADVANCES GIVEN TO SUPPLIERS
+// ============================================
+
 $advances_given = $pdo->prepare("
     SELECT COALESCE(SUM(advance_amount), 0) as total
     FROM purchase_orders
@@ -102,7 +154,10 @@ $topups_given = $topups_given->fetchColumn();
 
 $cash_advances_given = $advances_given + $topups_given;
 
-// Check if end of day already recorded for the selected date
+// ============================================
+// CHECK IF EOD ALREADY RECORDED
+// ============================================
+
 $existing_eod = $pdo->prepare("
     SELECT * FROM end_of_day 
     WHERE branch_id = ? AND report_date = ?
@@ -110,7 +165,6 @@ $existing_eod = $pdo->prepare("
 $existing_eod->execute([$branch_id, $selected_date]);
 $existing_eod = $existing_eod->fetch();
 
-// Admin can re-open an already-recorded day to correct a mistake
 $edit_mode = $is_admin && isset($_GET['edit']) && $existing_eod;
 
 // ============================================
@@ -125,15 +179,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['save_eod'])) {
     $save_date = $_POST['report_date'] ?? $selected_date;
     $is_edit_save = $is_admin && isset($_POST['is_edit']) && $_POST['is_edit'] == '1';
 
-    // FIX: expected cash now accounts for everything that actually moves
-    // cash in or out of the drawer that day - previously only sales-cash
-    // and customer payments were added, and nothing was ever subtracted.
+    // Expected Cash:
+    // Sales cash + customer cash payments - cash expenses - supplier cash payments - cash advances - workspace branch cash costs
     $expected_cash = $sales_summary['total_cash']
                    + $payments_received_cash
                    - $cash_expenses
                    - $payments_made_cash
-                   - $cash_advances_given;
+                   - $cash_advances_given
+                   - $workspace_costs_cash;
+    
+    // Expected MOMO:
+    // Sales MOMO + customer MOMO payments
     $expected_momo = $sales_summary['total_momo'] + $payments_received_momo;
+    
+    // Total expenses for display (regular expenses + workspace branch costs)
+    $total_expenses_for_eod = $expenses_total + $workspace_costs_branch;
     
     $cash_diff = $actual_cash - $expected_cash;
     $momo_diff = $actual_momo - $expected_momo;
@@ -150,7 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['save_eod'])) {
         }
 
         if ($is_edit_save) {
-            // Admin correcting an existing record - UPDATE, don't duplicate
+            // Admin correcting an existing record
             $stmt = $pdo->prepare("
                 UPDATE end_of_day SET
                     expected_cash=?, actual_cash=?, expected_momo=?, actual_momo=?,
@@ -159,7 +219,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['save_eod'])) {
             ");
             $stmt->execute([
                 $expected_cash, $actual_cash, $expected_momo, $actual_momo,
-                $expenses_total, $sales_summary['total_sales'],
+                $total_expenses_for_eod, $sales_summary['total_sales'],
                 json_encode($discrepancies), $notes, $status,
                 $branch_id, $save_date
             ]);
@@ -181,7 +241,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['save_eod'])) {
                 $actual_cash,
                 $expected_momo,
                 $actual_momo,
-                $expenses_total,
+                $total_expenses_for_eod,
                 $sales_summary['total_sales'],
                 json_encode($discrepancies),
                 $notes,
@@ -245,8 +305,6 @@ include '../includes/sidebar.php';
         </p>
     </div>
     <div class="d-flex align-items-center gap-2">
-        <!-- FIX: date picker added - previously $today was hardcoded so a
-             missed day could never be filed after the fact. -->
         <form method="GET" class="d-flex gap-2">
             <input type="date" name="date" class="form-control form-control-sm"
                    value="<?php echo $selected_date; ?>" max="<?php echo $today; ?>"
@@ -281,15 +339,20 @@ TODAY'S SUMMARY
     <div class="col-md-3 col-6">
         <div class="stat-card text-center">
             <p class="stat-label">Mobile Money</p>
-            <h4 class="text-info"><?php echo number_format($sales_summary['total_momo'], 0); ?></h4>
-            <small><?php echo number_format($sales_summary['total_momo'], 0); ?> from sales</small>
+            <h4 class="text-info"><?php echo number_format($sales_summary['total_momo'] + $payments_received_momo, 0); ?></h4>
+            <small>Sales: <?php echo number_format($sales_summary['total_momo'], 0); ?> + MOMO Payments: <?php echo number_format($payments_received_momo, 0); ?></small>
         </div>
     </div>
     <div class="col-md-3 col-6">
         <div class="stat-card text-center">
-            <p class="stat-label">Expenses</p>
-            <h4 class="text-danger"><?php echo number_format($expenses_total, 0); ?></h4>
-            <small>Net: <?php echo number_format($sales_summary['total_sales'] - $expenses_total, 0); ?></small>
+            <p class="stat-label">Total Expenses</p>
+            <h4 class="text-danger"><?php echo number_format($expenses_total + $workspace_costs_total, 0); ?></h4>
+            <small>
+                Branch: <?php echo number_format($expenses_total, 0); ?> 
+                <?php if($workspace_costs_total > 0): ?>
+                | Workspace: <?php echo number_format($workspace_costs_total, 0); ?>
+                <?php endif; ?>
+            </small>
         </div>
     </div>
 </div>
@@ -306,9 +369,15 @@ EOD FORM
     </div>
     <div class="card-body">
         <?php
-        $calc_expected_cash = $sales_summary['total_cash'] + $payments_received_cash
-                            - $cash_expenses - $payments_made_cash - $cash_advances_given;
+        $calc_expected_cash = $sales_summary['total_cash']
+                            + $payments_received_cash
+                            - $cash_expenses
+                            - $payments_made_cash
+                            - $cash_advances_given
+                            - $workspace_costs_cash;
+        
         $calc_expected_momo = $sales_summary['total_momo'] + $payments_received_momo;
+        
         $prefill_cash = $edit_mode ? $existing_eod['actual_cash'] : $calc_expected_cash;
         $prefill_momo = $edit_mode ? $existing_eod['actual_momo'] : $calc_expected_momo;
         ?>
@@ -325,7 +394,10 @@ EOD FORM
                             + customer cash payments (<?php echo number_format($payments_received_cash,0); ?>)
                             − cash expenses (<?php echo number_format($cash_expenses,0); ?>)
                             − supplier cash payments (<?php echo number_format($payments_made_cash,0); ?>)
-                            − advances/top-ups given (<?php echo number_format($cash_advances_given,0); ?>)
+                            − advances/top-ups (<?php echo number_format($cash_advances_given,0); ?>)
+                            <?php if($workspace_costs_cash > 0): ?>
+                            − workspace costs (<?php echo number_format($workspace_costs_cash,0); ?>)
+                            <?php endif; ?>
                         </small>
                     </div>
                     <div class="mb-3">
@@ -339,7 +411,10 @@ EOD FORM
                     <div class="alert alert-info">
                         <strong>Expected Mobile Money:</strong> <?php echo number_format($calc_expected_momo, 0); ?> RWF
                         <br>
-                        <small>MOMO from sales + customer MOMO payments</small>
+                        <small>
+                            MOMO from sales (<?php echo number_format($sales_summary['total_momo'],0); ?>)
+                            + customer MOMO payments (<?php echo number_format($payments_received_momo,0); ?>)
+                        </small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Actual Mobile Money (RWF) *</label>
@@ -378,8 +453,6 @@ EOD FORM
     <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
         <h5 class="mb-0"><i class="fas fa-check-circle me-2"></i>End of Day Already Recorded</h5>
         <?php if($is_admin): ?>
-        <!-- FIX: previously no way to correct a mistyped actual-cash
-             figure once saved, short of editing the database directly. -->
         <a href="?date=<?php echo $selected_date; ?>&edit=1" class="btn btn-sm btn-light">
             <i class="fas fa-edit me-1"></i> Correct This Entry
         </a>

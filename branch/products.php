@@ -7,9 +7,6 @@ $branch_id = getCurrentBranch();
 $is_admin = isAdmin();  // Use the actual function
 $message = '';
 
-// DEBUG - Remove after fixing
-// echo "<!-- isAdmin: " . ($is_admin ? 'TRUE' : 'FALSE') . " -->";
-
 // ============================================
 // HANDLE FORM SUBMISSIONS
 // ============================================
@@ -58,11 +55,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['save_product'])) {
 }
 
 // Delete Product
-// FIX: previously this ran a raw DELETE with no check and no try/catch.
-// sale_items, purchase_items, and purchase_order_items all have a foreign
-// key on product_id with no ON DELETE rule, so deleting any product that
-// has ever been sold or purchased threw an uncaught PDOException — an
-// ugly raw SQL crash screen instead of a friendly message.
 if (isset($_GET['delete']) && is_numeric($_GET['delete']) && $is_admin) {
     $id = $_GET['delete'];
 
@@ -138,96 +130,7 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit']) && $is_admin) {
     $edit_product = $stmt->fetch();
 }
 
-// ============================================
-// PRODUCT DETAILS DATA
-// ============================================
-
-function getProductDetails($pdo, $product_id, $branch_id) {
-    // Sales history
-    $sales = $pdo->prepare("
-        SELECT 
-            s.id,
-            s.invoice_no,
-            s.sale_date,
-            si.quantity,
-            si.selling_price,
-            si.subtotal,
-            c.name as customer_name
-        FROM sale_items si
-        JOIN sales s ON si.sale_id = s.id
-        LEFT JOIN customers c ON s.customer_id = c.id
-        WHERE si.product_id = ? AND s.branch_id = ?
-        ORDER BY s.sale_date DESC
-        LIMIT 20
-    ");
-    $sales->execute([$product_id, $branch_id]);
-    $sales_data = $sales->fetchAll();
-    
-    // Purchase history
-    $purchases = $pdo->prepare("
-        SELECT 
-            pi.purchase_id,
-            pi.quantity,
-            pi.unit_price,
-            pi.subtotal,
-            p.purchase_date,
-            p.invoice_no,
-            s.name as supplier_name
-        FROM purchase_items pi
-        JOIN purchases p ON pi.purchase_id = p.id
-        LEFT JOIN suppliers s ON p.supplier_id = s.id
-        WHERE pi.product_id = ? AND p.branch_id = ?
-        ORDER BY p.purchase_date DESC
-        LIMIT 20
-    ");
-    $purchases->execute([$product_id, $branch_id]);
-    $purchase_data = $purchases->fetchAll();
-    
-    // Stock history (from purchases and advance POs)
-    $stock_history = $pdo->prepare("
-        SELECT 
-            p.purchase_date as date,
-            CASE 
-                WHEN p.invoice_no LIKE 'PO-%' THEN 'Advance PO'
-                ELSE 'Regular Purchase'
-            END as type,
-            s.name as supplier_name,
-            pi.quantity,
-            pi.unit_price,
-            p.invoice_no
-        FROM purchase_items pi
-        JOIN purchases p ON pi.purchase_id = p.id
-        LEFT JOIN suppliers s ON p.supplier_id = s.id
-        WHERE pi.product_id = ? AND p.branch_id = ?
-        ORDER BY p.purchase_date DESC
-        LIMIT 50
-    ");
-    $stock_history->execute([$product_id, $branch_id]);
-    $stock_history_data = $stock_history->fetchAll();
-    
-    // Profit/Loss summary
-    $summary = $pdo->prepare("
-        SELECT 
-            COALESCE(SUM(si.quantity), 0) as total_sold,
-            COALESCE(SUM(si.subtotal), 0) as total_revenue,
-            COALESCE(SUM(si.quantity * si.cost_price_at_sale), 0) as total_cost,
-            COALESCE(SUM(si.subtotal - (si.quantity * si.cost_price_at_sale)), 0) as total_profit
-        FROM sale_items si
-        JOIN sales s ON si.sale_id = s.id
-        WHERE si.product_id = ? AND s.branch_id = ?
-    ");
-    $summary->execute([$product_id, $branch_id]);
-    $summary_data = $summary->fetch();
-    
-    return [
-        'sales' => $sales_data,
-        'purchases' => $purchase_data,
-        'stock_history' => $stock_history_data,
-        'summary' => $summary_data
-    ];
-}
-
-// Get product details if viewing
+// Get product details if viewing (using the function from db.php)
 $product_details = null;
 if ($detail_product) {
     $product_details = getProductDetails($pdo, $detail_product['id'], $branch_id);
@@ -578,10 +481,10 @@ include '../includes/sidebar.php';
                     <div class="row mb-3">
                         <div class="col-12">
                             <div class="btn-group w-100">
-                                <a href="../sales.php?product=<?php echo $detail_product['id']; ?>" class="btn btn-success">
+                                <a href="sales.php?product=<?php echo $detail_product['id']; ?>" class="btn btn-success">
                                     <i class="fas fa-cash-register"></i> Sell Now
                                 </a>
-                                <a href="../purchases.php?product=<?php echo $detail_product['id']; ?>" class="btn btn-primary">
+                                <a href="stock_in.php?product=<?php echo $detail_product['id']; ?>" class="btn btn-primary">
                                     <i class="fas fa-truck"></i> Add Stock
                                 </a>
                                 <?php if($is_admin): ?>
@@ -633,6 +536,9 @@ include '../includes/sidebar.php';
                                     </div>
                                 </div>
                                 <div class="col-md-6">
+                                    <!-- ============================================
+                                    UPDATED STOCK HISTORY WITH WORKSPACE CONSUMPTION
+                                    ============================================ -->
                                     <div class="card">
                                         <div class="card-body">
                                             <h6><i class="fas fa-history me-2 text-info"></i>Stock History</h6>
@@ -647,13 +553,18 @@ include '../includes/sidebar.php';
                                                     <thead>
                                                         <tr>
                                                             <th>Date</th>
-                                                            <th>Supplier</th>
+                                                            <th>Source</th>
                                                             <th>Qty</th>
                                                             <th>Type</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        <?php foreach($product_details['stock_history'] as $history): ?>
+                                                        <?php foreach($product_details['stock_history'] as $history): 
+                                                            $is_out = $history['direction'] == 'out';
+                                                            $is_cost = $history['direction'] == 'cost';
+                                                            $qty_class = $is_out ? 'text-danger' : ($is_cost ? 'text-muted' : 'text-success');
+                                                            $qty_prefix = $is_out ? '-' : ($is_cost ? '' : '+');
+                                                        ?>
                                                         <tr>
                                                             <td>
                                                                 <small><?php echo date('M d, Y', strtotime($history['date'])); ?></small>
@@ -661,15 +572,23 @@ include '../includes/sidebar.php';
                                                             <td>
                                                                 <small><?php echo htmlspecialchars($history['supplier_name'] ?? 'Unknown'); ?></small>
                                                             </td>
-                                                            <td>
-                                                                <strong><?php echo $history['quantity']; ?></strong>
+                                                            <td class="<?php echo $qty_class; ?>">
+                                                                <strong><?php echo $qty_prefix . ($is_cost ? '' : $history['quantity_change']); ?></strong>
+                                                                <?php if(!$is_cost): ?>
                                                                 <br>
                                                                 <small class="text-muted">@ <?php echo number_format($history['unit_price'], 0); ?> RWF</small>
+                                                                <?php endif; ?>
                                                             </td>
                                                             <td>
-                                                                <span class="badge bg-<?php echo $history['type'] == 'Advance PO' ? 'success' : 'primary'; ?>">
-                                                                    <?php echo $history['type']; ?>
-                                                                </span>
+                                                                <?php if($history['type'] == 'To Production'): ?>
+                                                                <span class="badge bg-warning">🏭 To Production</span>
+                                                                <?php elseif($history['type'] == 'Production Cost'): ?>
+                                                                <span class="badge bg-secondary">💰 Cost</span>
+                                                                <?php elseif($history['type'] == 'Advance PO'): ?>
+                                                                <span class="badge bg-success">📦 Advance PO</span>
+                                                                <?php else: ?>
+                                                                <span class="badge bg-primary">📥 <?php echo $history['type']; ?></span>
+                                                                <?php endif; ?>
                                                             </td>
                                                         </tr>
                                                         <?php endforeach; ?>

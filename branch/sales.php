@@ -47,8 +47,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_sale'])) {
     try {
         $pdo->beginTransaction();
         
-        // === START: New Customer Handling for Debt ===
-        $customer_id = $_POST['customer_id'] ?? null;
+        // === FIX: Handle customer_id properly ===
+        $customer_id = $_POST['customer_id'] ?? '';
+        
+        // If empty string, set to NULL (Walk-in Customer)
+        if ($customer_id === '') {
+            $customer_id = null;
+        }
         
         // If "new" customer selected, create it
         if ($customer_id == 'new') {
@@ -101,8 +106,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_sale'])) {
             
             $unit_price = floatval($item['price'] ?? $product['selling_price']);
 
-            // FIX: never allow a sale price below cost price, even if the
-            // client-side check was somehow bypassed.
+            // FIX: never allow a sale price below cost price
             if ($unit_price < $product['cost_price']) {
                 throw new Exception("Premium Price for \"{$product['name']}\" (" . number_format($unit_price,0) . " RWF) cannot be below its cost price (" . number_format($product['cost_price'],0) . " RWF).");
             }
@@ -151,7 +155,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_sale'])) {
         ");
         $stmt->execute([
             $branch_id,
-            $customer_id,
+            $customer_id,  // Now properly NULL or integer
             $invoice_no,
             $sale_date,
             $subtotal,
@@ -589,8 +593,7 @@ function addItem() {
     
     const customPrice = parseFloat(document.getElementById('custom_price_input').value);
 
-    // FIX: Premium Price can never undercut cost price — that would be a
-    // guaranteed loss on the sale, not a premium.
+    // FIX: Premium Price can never undercut cost price
     if (!isNaN(customPrice) && customPrice > 0 && customPrice < selectedProduct.cost) {
         alert('Premium Price (' + formatNumber(customPrice) + ' RWF) cannot be below the cost price ('
               + formatNumber(selectedProduct.cost) + ' RWF) for "' + selectedProduct.name + '".');
@@ -778,8 +781,11 @@ function prepareSubmit() {
     return true;
 }
 
+// ============================================
+// FIX: formatNumber returns raw number without commas
+// ============================================
 function formatNumber(n) {
-    return new Intl.NumberFormat('en-RW').format(Math.round(n));
+    return Math.round(n);
 }
 
 function escapeHtml(str) {

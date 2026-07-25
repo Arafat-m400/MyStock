@@ -12,31 +12,35 @@ $active_tab = $_GET['tab'] ?? 'create';
 // GET DATA
 // ============================================
 
+$products = $pdo->prepare("SELECT id, name, sku, quantity, cost_price, unit FROM products WHERE branch_id = ? ORDER BY name");
+$products->execute([$branch_id]);
+$products = $products->fetchAll();
+
+$suppliers = $pdo->prepare("SELECT id, name, phone, whatsapp FROM suppliers WHERE branch_id = ? ORDER BY name");
+$suppliers->execute([$branch_id]);
+$suppliers = $suppliers->fetchAll();
+
 // ============================================
-// Keep the "we owe the supplier" payable in sync with cash-advance POs.
-//
-// Requires a nullable po_id column on supplier_debts — run this once:
-//   ALTER TABLE supplier_debts ADD COLUMN po_id INT NULL AFTER purchase_id;
-//
-// Only the "we_owe" direction creates/updates a debts.php entry — that's
-// the only direction that's actually a payable (money the shop owes the
-// supplier). "supplier_owes" (they still owe us goods against the
-// advance) is a receivable, not a debt, so it intentionally does NOT
-// show up on the Debts page.
+// KEEP SUPPLIER DEBT IN SYNC WITH ADVANCE PO
 // ============================================
+
 function syncSupplierDebtForAdvancePO($pdo, $po_id, $supplier_id, $branch_id, $direction, $balance) {
     try {
-        $pdo->exec("CREATE TABLE IF NOT EXISTS supplier_debts (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            supplier_id INT NOT NULL,
-            branch_id INT NOT NULL,
-            po_id INT NULL,
-            amount DECIMAL(12,2) NOT NULL DEFAULT 0,
-            paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
-            remaining DECIMAL(12,2) NOT NULL DEFAULT 0,
-            status VARCHAR(20) NOT NULL DEFAULT 'pending',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )");
+        // Check if table exists, create if not
+        $table_check = $pdo->query("SHOW TABLES LIKE 'supplier_debts'");
+        if ($table_check->rowCount() == 0) {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS supplier_debts (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                supplier_id INT NOT NULL,
+                branch_id INT NOT NULL,
+                po_id INT NULL,
+                amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+                paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+                remaining DECIMAL(12,2) NOT NULL DEFAULT 0,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )");
+        }
 
         $existing = $pdo->prepare("SELECT * FROM supplier_debts WHERE po_id = ? AND branch_id = ?");
         $existing->execute([$po_id, $branch_id]);
@@ -65,14 +69,6 @@ function syncSupplierDebtForAdvancePO($pdo, $po_id, $supplier_id, $branch_id, $d
     }
 }
 
-$products = $pdo->prepare("SELECT id, name, sku, quantity, cost_price, unit FROM products WHERE branch_id = ? ORDER BY name");
-$products->execute([$branch_id]);
-$products = $products->fetchAll();
-
-$suppliers = $pdo->prepare("SELECT id, name, phone, whatsapp FROM suppliers WHERE branch_id = ? ORDER BY name");
-$suppliers->execute([$branch_id]);
-$suppliers = $suppliers->fetchAll();
-
 // ============================================
 // CREATE PURCHASE ORDER - DUAL FLOW
 // ============================================
@@ -87,13 +83,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['create_po'])) {
         $expected_delivery = $_POST['expected_delivery'] ?: null;
         $notes = trim($_POST['notes'] ?? '');
 
-        // Make sure the supplier actually belongs to this branch —
-        // otherwise a tampered supplier_id could attach a PO to a
-        // supplier that isn't even yours.
+        // Make sure the supplier actually belongs to this branch
         $sup_check = $pdo->prepare("SELECT id, whatsapp, name FROM suppliers WHERE id = ? AND branch_id = ?");
         $sup_check->execute([$supplier_id, $branch_id]);
         $supp = $sup_check->fetch();
         if (!$supp) throw new Exception("Supplier not found for this branch.");
+
+        // Initialize variables to avoid undefined errors
+        $total_amount = 0;
+        $advance_amount = 0;
+        $po_number = '';
+        $po_id = 0;
 
         if ($po_type == 'formal') {
             $items = json_decode($_POST['items_json'] ?? '[]', true);
@@ -160,13 +160,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['create_po'])) {
             $pdo->prepare("UPDATE suppliers SET total_traded = total_traded + ? WHERE id = ?")
                 ->execute([$advance_amount, $supplier_id]);
 
-            $total_amount = null;
             $success_msg = "✅ Cash Advance Created! Supplier now owes you " . number_format($advance_amount, 0) . " RWF in goods.";
         }
 
         $pdo->commit();
 
-        logAction($pdo, 'PO Created', "PO: $po_number, Type: $po_type, Total: " . ($total_amount ?? $advance_amount));
+        logAction($pdo, 'PO Created', "PO: $po_number, Type: $po_type, Total: " . ($po_type == 'formal' ? $total_amount : $advance_amount));
 
         $display_total = $po_type == 'formal' ? $total_amount : $advance_amount;
         $message = '<div class="alert alert-success alert-permanent">
@@ -240,8 +239,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['topup_advance'])) {
         $pdo->prepare("UPDATE suppliers SET total_debt = ? WHERE id = ?")
             ->execute([$direction == 'supplier_owes' ? abs($balance) : 0, $po['supplier_id']]);
 
-        // A top-up can push the balance back toward "settled" or flip it
-        // fully to "supplier_owes" — keep the debts.php record in sync too.
         syncSupplierDebtForAdvancePO($pdo, $po_id, $po['supplier_id'], $branch_id, $direction, $balance);
 
         $pdo->commit();
@@ -279,6 +276,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['receive_items'])) {
 
         $total_goods_value = 0;
         $any_received = false;
+        $direction = 'settled';
+        $balance = 0;
 
         foreach ($items_received as $item) {
             $product_id = intval($item['product_id'] ?? 0);
@@ -308,11 +307,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['receive_items'])) {
                 $upd->execute([$received_qty, $item_id, $po_id]);
                 if ($upd->rowCount() === 0) throw new Exception("That order line doesn't belong to this PO.");
             } else {
-                // FIX: quantity_ordered is NOT NULL in the real schema —
-                // there's no "ordered" concept for an advance delivery,
-                // so we just record what came back as both ordered and
-                // received (keeps it NOT NULL-safe and makes the item
-                // show as "Complete" on view_po.php, which is accurate).
                 $pdo->prepare("
                     INSERT INTO purchase_order_items (
                         po_id, product_id, quantity_ordered, quantity_received,
@@ -513,6 +507,9 @@ include '../includes/header.php';
 include '../includes/sidebar.php';
 ?>
 
+<!-- ============================================
+REST OF THE HTML - UNCHANGED
+============================================ -->
 <div class="col-md-10 main-content">
     <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
         <div>
@@ -758,7 +755,7 @@ include '../includes/sidebar.php';
     <?php endif; ?>
 
     <!-- ============================================
-    RECEIVE MODAL
+    RECEIVE MODAL - UNCHANGED
     ============================================ -->
     <?php if($po_to_receive): ?>
     <div class="modal show d-block" tabindex="-1" style="background: rgba(0,0,0,0.5);">
@@ -1082,7 +1079,7 @@ function updatePOTotals() {
 }
 
 function formatNumber(n) {
-    return new Intl.NumberFormat('en-RW').format(Math.round(n));
+    return Math.round(n);
 }
 
 function escapeHtml(str) {

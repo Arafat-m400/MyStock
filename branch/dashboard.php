@@ -51,17 +51,7 @@ $stmt = $pdo->prepare("
 $stmt->execute([$branch_id]);
 $today_expenses = $stmt->fetchColumn();
 
-// 6. Today's Workspace Production Costs (from workspace_costs)
-$stmt = $pdo->prepare("
-    SELECT COALESCE(SUM(wc.amount), 0) as total
-    FROM workspace_costs wc
-    JOIN workspaces w ON wc.workspace_id = w.id
-    WHERE w.branch_id = ? AND wc.cost_date = CURDATE()
-");
-$stmt->execute([$branch_id]);
-$today_workspace_costs = $stmt->fetchColumn();
-
-// 7. Today's REAL profit (revenue - cost of goods sold - expenses - workspace costs)
+// 6. Today's REAL profit (revenue - cost of goods sold - expenses)
 $stmt = $pdo->prepare("
     SELECT COALESCE(SUM(si.quantity * si.cost_price_at_sale), 0) as total_cogs
     FROM sale_items si
@@ -72,10 +62,10 @@ $stmt->execute([$branch_id]);
 $today_cogs = $stmt->fetchColumn();
 
 $today_gross_profit = $today_sales['total_sales'] - $today_cogs;
-$today_total_expenses = $today_expenses + $today_workspace_costs;
+$today_total_expenses = $today_expenses;
 $today_net = $today_gross_profit - $today_total_expenses;
 
-// 7b. This month's REAL profit
+// 6b. This month's REAL profit
 $stmt = $pdo->prepare("
     SELECT COALESCE(SUM(si.quantity * si.cost_price_at_sale), 0) as total_cogs
     FROM sale_items si
@@ -93,21 +83,10 @@ $stmt = $pdo->prepare("
 $stmt->execute([$branch_id]);
 $month_expenses = $stmt->fetchColumn();
 
-// Month workspace costs
-$stmt = $pdo->prepare("
-    SELECT COALESCE(SUM(wc.amount), 0) as total
-    FROM workspace_costs wc
-    JOIN workspaces w ON wc.workspace_id = w.id
-    WHERE w.branch_id = ? AND MONTH(wc.cost_date) = MONTH(CURDATE()) AND YEAR(wc.cost_date) = YEAR(CURDATE())
-");
-$stmt->execute([$branch_id]);
-$month_workspace_costs = $stmt->fetchColumn();
-
 $month_gross_profit = $month_sales - $month_cogs;
-$month_total_expenses = $month_expenses + $month_workspace_costs;
-$month_net_profit = $month_gross_profit - $month_total_expenses;
+$month_net_profit = $month_gross_profit - $month_expenses;
 
-// 8. Stock Value
+// 7. Stock Value
 $stmt = $pdo->prepare("
     SELECT COALESCE(SUM(quantity * cost_price), 0) as total 
     FROM products 
@@ -116,51 +95,7 @@ $stmt = $pdo->prepare("
 $stmt->execute([$branch_id]);
 $stock_value = $stmt->fetchColumn();
 
-// ============================================
-// WORKSPACE STATS
-// ============================================
-
-// 9. Workspace Summary
-$workspace_summary = $pdo->prepare("
-    SELECT 
-        COUNT(*) as total_workspaces,
-        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_count,
-        SUM(CASE WHEN status = 'paused' THEN 1 ELSE 0 END) as paused_count,
-        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_count,
-        COALESCE(SUM(
-            (SELECT COALESCE(SUM(total_cost), 0) FROM workspace_inputs WHERE workspace_id = w.id)
-        ), 0) as total_input_cost,
-        COALESCE(SUM(
-            (SELECT COALESCE(SUM(amount), 0) FROM workspace_costs WHERE workspace_id = w.id)
-        ), 0) as total_production_cost,
-        COALESCE(SUM(
-            (SELECT COALESCE(SUM(total_value), 0) FROM workspace_outputs WHERE workspace_id = w.id)
-        ), 0) as total_output_value
-    FROM workspaces w
-    WHERE w.branch_id = ?
-");
-$workspace_summary->execute([$branch_id]);
-$workspace_stats = $workspace_summary->fetch();
-
-// Calculate total workspace profit/loss
-$workspace_profit_loss = $workspace_stats['total_output_value'] - $workspace_stats['total_input_cost'] - $workspace_stats['total_production_cost'];
-
-// 10. Active Workspaces (for list)
-$active_workspaces = $pdo->prepare("
-    SELECT w.*,
-           COALESCE((SELECT SUM(total_cost) FROM workspace_inputs WHERE workspace_id = w.id), 0) as total_input_cost,
-           COALESCE((SELECT SUM(amount) FROM workspace_costs WHERE workspace_id = w.id), 0) as total_production_cost,
-           COALESCE((SELECT SUM(total_value) FROM workspace_outputs WHERE workspace_id = w.id), 0) as total_output_value,
-           (SELECT COUNT(*) FROM workspace_outputs WHERE workspace_id = w.id) as output_count
-    FROM workspaces w
-    WHERE w.branch_id = ? AND w.status IN ('active', 'paused')
-    ORDER BY w.created_at DESC
-    LIMIT 5
-");
-$active_workspaces->execute([$branch_id]);
-$active_workspaces = $active_workspaces->fetchAll();
-
-// 11. All Products (for product cards)
+// 8. All Products (for product cards)
 $stmt = $pdo->prepare("
     SELECT * FROM products 
     WHERE branch_id = ? 
@@ -172,7 +107,7 @@ $stmt = $pdo->prepare("
 $stmt->execute([$branch_id]);
 $all_products = $stmt->fetchAll();
 
-// 12. Low Stock Products (for list)
+// 9. Low Stock Products (for list)
 $stmt = $pdo->prepare("
     SELECT * FROM products 
     WHERE branch_id = ? AND quantity <= reorder_level 
@@ -305,7 +240,7 @@ MAIN CONTENT - col-md-10
     </div>
 
     <!-- ============================================
-    STATS CARDS - Second Row (with Workspace Stats)
+    STATS CARDS - Second Row
     ============================================ -->
     <div class="row g-3 mb-4">
         <!-- Monthly Sales & Profit -->
@@ -346,49 +281,8 @@ MAIN CONTENT - col-md-10
             </div>
         </div>
         
-        <!-- Workspace Summary - Active -->
-        <div class="col-6 col-md-3">
-            <div class="card stat-card shadow-sm h-100">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <p class="stat-label text-muted mb-1">Active Workspaces</p>
-                            <h4 class="stat-value mb-0 text-success"><?php echo $workspace_stats['active_count'] ?? 0; ?></h4>
-                            <small class="text-muted">
-                                <?php echo ($workspace_stats['paused_count'] ?? 0); ?> paused | 
-                                <?php echo ($workspace_stats['completed_count'] ?? 0); ?> completed
-                            </small>
-                        </div>
-                        <div class="stat-icon bg-success bg-opacity-10 text-success rounded-3 p-3">
-                            <i class="fas fa-industry fs-4"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Workspace Profit/Loss -->
-        <div class="col-6 col-md-3">
-            <div class="card stat-card shadow-sm h-100">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <p class="stat-label text-muted mb-1">Workspace P/L</p>
-                            <h4 class="stat-value mb-0 text-<?php echo $workspace_profit_loss >= 0 ? 'primary' : 'danger'; ?>">
-                                <?php echo number_format($workspace_profit_loss, 0); ?>
-                            </h4>
-                            <small class="text-muted">
-                                In: <?php echo number_format($workspace_stats['total_input_cost'] ?? 0, 0); ?> | 
-                                Out: <?php echo number_format($workspace_stats['total_output_value'] ?? 0, 0); ?>
-                            </small>
-                        </div>
-                        <div class="stat-icon bg-<?php echo $workspace_profit_loss >= 0 ? 'primary' : 'danger'; ?> bg-opacity-10 text-<?php echo $workspace_profit_loss >= 0 ? 'primary' : 'danger'; ?> rounded-3 p-3">
-                            <i class="fas fa-chart-pie fs-4"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <!-- Today's Sales (duplicate removed - replaced with Payment Methods) -->
+        <!-- Payment Methods moved to its own row below -->
     </div>
 
     <!-- ============================================
@@ -484,67 +378,62 @@ MAIN CONTENT - col-md-10
     </div>
 
     <!-- ============================================
-    WORKSPACE OVERVIEW & LOW STOCK
+    RECENT SALES & LOW STOCK
     ============================================ -->
     <div class="row">
-        <!-- Workspace Overview (replaces Recent Sales) -->
+        <!-- Recent Sales -->
         <div class="col-md-6 mb-4">
             <div class="card h-100 shadow-sm">
                 <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0"><i class="fas fa-industry me-2 text-primary"></i>Active Workspaces</h5>
-                    <a href="workspaces.php" class="btn btn-sm btn-primary">View All</a>
+                    <h5 class="mb-0"><i class="fas fa-clock me-2 text-primary"></i>Recent Sales</h5>
+                    <a href="sales.php" class="btn btn-sm btn-primary">View All</a>
                 </div>
                 <div class="card-body p-0">
-                    <?php if(empty($active_workspaces)): ?>
-                    <div class="text-center py-4 text-muted">
-                        <i class="fas fa-industry fa-2x mb-2 d-block"></i>
-                        No active workspaces.
-                        <a href="workspaces.php?tab=create" class="d-block mt-2">Create your first workspace</a>
-                    </div>
-                    <?php else: ?>
+                    <?php
+                    // Get recent sales
+                    $recent_sales = $pdo->prepare("
+                        SELECT s.*, c.name as customer_name 
+                        FROM sales s
+                        LEFT JOIN customers c ON s.customer_id = c.id
+                        WHERE s.branch_id = ?
+                        ORDER BY s.created_at DESC 
+                        LIMIT 5
+                    ");
+                    $recent_sales->execute([$branch_id]);
+                    $recent_sales = $recent_sales->fetchAll();
+                    ?>
                     <div class="table-responsive">
                         <table class="table table-hover mb-0">
                             <thead class="table-light">
                                 <tr>
-                                    <th>Workspace</th>
-                                    <th>Status</th>
-                                    <th class="text-end">P/L</th>
-                                    <th></th>
+                                    <th>Invoice</th>
+                                    <th>Customer</th>
+                                    <th class="text-end">Amount</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php foreach($active_workspaces as $ws):
-                                    $ws_profit = $ws['total_output_value'] - $ws['total_input_cost'] - $ws['total_production_cost'];
-                                    $profit_class = $ws_profit >= 0 ? 'text-success' : 'text-danger';
-                                    $status_badge = $ws['status'] == 'active' ? 'success' : 'warning';
-                                ?>
+                                <?php if(empty($recent_sales)): ?>
                                 <tr>
-                                    <td>
-                                        <strong><?php echo htmlspecialchars($ws['name']); ?></strong>
-                                        <br>
-                                        <small class="text-muted">
-                                            <?php echo $ws['output_count']; ?> outputs
-                                        </small>
-                                    </td>
-                                    <td>
-                                        <span class="badge bg-<?php echo $status_badge; ?>">
-                                            <?php echo strtoupper($ws['status']); ?>
-                                        </span>
-                                    </td>
-                                    <td class="text-end <?php echo $profit_class; ?>">
-                                        <strong><?php echo number_format($ws_profit, 0); ?></strong>
-                                    </td>
-                                    <td>
-                                        <a href="workspace_details.php?id=<?php echo $ws['id']; ?>" class="btn btn-sm btn-outline-primary">
-                                            <i class="fas fa-arrow-right"></i>
-                                        </a>
+                                    <td colspan="3" class="text-center text-muted py-3">
+                                        No sales today
                                     </td>
                                 </tr>
+                                <?php else: ?>
+                                <?php foreach($recent_sales as $sale): ?>
+                                <tr>
+                                    <td>
+                                        <a href="view_invoice.php?id=<?php echo $sale['id']; ?>" target="_blank">
+                                            <small><?php echo htmlspecialchars($sale['invoice_no']); ?></small>
+                                        </a>
+                                    </td>
+                                    <td><?php echo htmlspecialchars($sale['customer_name'] ?? 'Walk-in'); ?></td>
+                                    <td class="text-end"><strong><?php echo number_format($sale['grand_total'], 0); ?></strong></td>
+                                </tr>
                                 <?php endforeach; ?>
+                                <?php endif; ?>
                             </tbody>
                         </table>
                     </div>
-                    <?php endif; ?>
                 </div>
             </div>
         </div>

@@ -8,14 +8,6 @@ $message = '';
 $active_tab = $_GET['tab'] ?? 'list';
 
 // ============================================
-// GET DATA FOR FORMS
-// ============================================
-
-$products = $pdo->prepare("SELECT id, name, unit, quantity, cost_price, selling_price FROM products WHERE branch_id = ? ORDER BY name");
-$products->execute([$branch_id]);
-$products = $products->fetchAll();
-
-// ============================================
 // CREATE WORKSPACE
 // ============================================
 
@@ -48,15 +40,12 @@ $workspaces = $pdo->prepare("
     SELECT w.*, 
            u.full_name as created_by_name,
            COALESCE(SUM(wi.total_cost), 0) as total_input_cost,
-           COALESCE(SUM(wc.amount), 0) as total_production_cost,
            COALESCE(SUM(wo.total_value), 0) as total_output_value,
            COUNT(DISTINCT wi.id) as input_count,
-           COUNT(DISTINCT wo.id) as output_count,
-           COUNT(DISTINCT wc.id) as cost_count
+           COUNT(DISTINCT wo.id) as output_count
     FROM workspaces w
     LEFT JOIN workspace_inputs wi ON wi.workspace_id = w.id
     LEFT JOIN workspace_outputs wo ON wo.workspace_id = w.id
-    LEFT JOIN workspace_costs wc ON wc.workspace_id = w.id
     LEFT JOIN users u ON w.created_by = u.id
     WHERE w.branch_id = ?
     GROUP BY w.id
@@ -65,9 +54,9 @@ $workspaces = $pdo->prepare("
 $workspaces->execute([$branch_id]);
 $workspaces = $workspaces->fetchAll();
 
-// Calculate profit/loss for each workspace
+// Calculate profit/loss for each workspace (Output - Input)
 foreach ($workspaces as &$ws) {
-    $ws['profit_loss'] = $ws['total_output_value'] - $ws['total_input_cost'] - $ws['total_production_cost'];
+    $ws['profit_loss'] = $ws['total_output_value'] - $ws['total_input_cost'];
 }
 
 include '../includes/header.php';
@@ -78,7 +67,7 @@ include '../includes/sidebar.php';
     <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
         <div>
             <h2><i class="fas fa-industry me-2 text-primary"></i>Workspace</h2>
-            <p class="text-muted">Manage production workflows, track inputs, costs, outputs, and profitability</p>
+            <p class="text-muted">Manage production workflows, track raw materials, expenses, outputs, and profitability</p>
         </div>
         <div>
             <a href="?tab=create" class="btn btn-primary">
@@ -103,7 +92,7 @@ include '../includes/sidebar.php';
                     <div class="col-12">
                         <label class="form-label">Workspace Name *</label>
                         <input type="text" name="name" class="form-control" required 
-                               placeholder="e.g., Maize Flour Production, Chicken Farm">
+                               placeholder="Project name">
                     </div>
                     <div class="col-12">
                         <label class="form-label">Description</label>
@@ -140,7 +129,7 @@ include '../includes/sidebar.php';
                 <div class="card-body text-center py-5">
                     <i class="fas fa-industry fa-4x text-muted mb-3 d-block"></i>
                     <h5>No Workspaces</h5>
-                    <p class="text-muted">Create your first production workspace to track raw materials, costs, and outputs.</p>
+                    <p class="text-muted">Create your first production workspace to track raw materials, expenses, and outputs.</p>
                     <a href="?tab=create" class="btn btn-primary">
                         <i class="fas fa-plus me-1"></i> Create Workspace
                     </a>
@@ -174,29 +163,23 @@ include '../includes/sidebar.php';
                     <p class="card-text small text-muted"><?php echo htmlspecialchars($ws['description']); ?></p>
                     <?php endif; ?>
                     
-                    <!-- Financial Summary -->
-                    <div class="row mt-3 g-1">
-                        <div class="col-6">
+                    <!-- Financial Summary - 3 Bar Cards (Rectangle) -->
+                    <div class="row g-2 mt-3">
+                        <div class="col-4">
                             <div class="p-2 bg-light rounded text-center">
                                 <small class="text-muted d-block">Inputs</small>
                                 <strong><?php echo number_format($ws['total_input_cost'], 0); ?></strong>
                             </div>
                         </div>
-                        <div class="col-6">
+                        <div class="col-4">
                             <div class="p-2 bg-light rounded text-center">
-                                <small class="text-muted d-block">Prod. Costs</small>
-                                <strong><?php echo number_format($ws['total_production_cost'], 0); ?></strong>
-                            </div>
-                        </div>
-                        <div class="col-6">
-                            <div class="p-2 bg-light rounded text-center">
-                                <small class="text-muted d-block">Output Value</small>
+                                <small class="text-muted d-block">Outputs</small>
                                 <strong class="text-success"><?php echo number_format($ws['total_output_value'], 0); ?></strong>
                             </div>
                         </div>
-                        <div class="col-6">
+                        <div class="col-4">
                             <div class="p-2 bg-<?php echo $profit_class; ?> bg-opacity-10 rounded text-center">
-                                <small class="text-muted d-block">Profit/Loss</small>
+                                <small class="text-muted d-block">P/L</small>
                                 <strong class="text-<?php echo $profit_class; ?>">
                                     <?php echo number_format($ws['profit_loss'], 0); ?>
                                 </strong>

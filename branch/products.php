@@ -537,7 +537,7 @@ include '../includes/sidebar.php';
                                 </div>
                                 <div class="col-md-6">
                                     <!-- ============================================
-                                    UPDATED STOCK HISTORY WITH WORKSPACE CONSUMPTION
+                                    STOCK HISTORY - No Workspace References
                                     ============================================ -->
                                     <div class="card">
                                         <div class="card-body">
@@ -560,10 +560,8 @@ include '../includes/sidebar.php';
                                                     </thead>
                                                     <tbody>
                                                         <?php foreach($product_details['stock_history'] as $history): 
-                                                            $is_out = $history['direction'] == 'out';
-                                                            $is_cost = $history['direction'] == 'cost';
-                                                            $qty_class = $is_out ? 'text-danger' : ($is_cost ? 'text-muted' : 'text-success');
-                                                            $qty_prefix = $is_out ? '-' : ($is_cost ? '' : '+');
+                                                            $qty_class = 'text-success';
+                                                            $qty_prefix = '+';
                                                         ?>
                                                         <tr>
                                                             <td>
@@ -573,18 +571,12 @@ include '../includes/sidebar.php';
                                                                 <small><?php echo htmlspecialchars($history['supplier_name'] ?? 'Unknown'); ?></small>
                                                             </td>
                                                             <td class="<?php echo $qty_class; ?>">
-                                                                <strong><?php echo $qty_prefix . ($is_cost ? '' : $history['quantity_change']); ?></strong>
-                                                                <?php if(!$is_cost): ?>
+                                                                <strong><?php echo $qty_prefix . $history['quantity_change']; ?></strong>
                                                                 <br>
                                                                 <small class="text-muted">@ <?php echo number_format($history['unit_price'], 0); ?> RWF</small>
-                                                                <?php endif; ?>
                                                             </td>
                                                             <td>
-                                                                <?php if($history['type'] == 'To Production'): ?>
-                                                                <span class="badge bg-warning">🏭 To Production</span>
-                                                                <?php elseif($history['type'] == 'Production Cost'): ?>
-                                                                <span class="badge bg-secondary">💰 Cost</span>
-                                                                <?php elseif($history['type'] == 'Advance PO'): ?>
+                                                                <?php if($history['type'] == 'Advance PO'): ?>
                                                                 <span class="badge bg-success">📦 Advance PO</span>
                                                                 <?php else: ?>
                                                                 <span class="badge bg-primary">📥 <?php echo $history['type']; ?></span>

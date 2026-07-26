@@ -7,6 +7,68 @@ $branch_id = getCurrentBranch();
 $workspace_id = $_GET['id'] ?? 0;
 $message = '';
 $active_tab = $_GET['tab'] ?? 'overview';
+$is_create = isset($_GET['action']) && $_GET['action'] == 'create';
+
+// ============================================
+// CREATE NEW WORKSPACE (Separate page)
+// ============================================
+
+if ($is_create) {
+    include '../includes/header.php';
+    include '../includes/sidebar.php';
+    ?>
+    <div class="col-md-10 main-content">
+        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
+            <div>
+                <h2><i class="fas fa-plus-circle me-2 text-primary"></i>Create New Workspace</h2>
+                <p class="text-muted">Start a new production workflow</p>
+            </div>
+            <a href="workspaces.php" class="btn btn-secondary">
+                <i class="fas fa-arrow-left me-1"></i> Back
+            </a>
+        </div>
+        
+        <?php echo $message; ?>
+        
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <!-- ============================================
+                IMPORTANT: Form submits to workspaces.php (NOT itself)
+                NO hidden id field - this is a pure INSERT
+                ============================================ -->
+                <form method="POST" action="workspaces.php">
+                    <div class="mb-3">
+                        <label class="form-label">Workspace Name *</label>
+                        <input type="text" name="name" class="form-control" required placeholder="Enter workspace name">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <textarea name="description" class="form-control" rows="3" placeholder="Describe the production process..."></textarea>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Start Date</label>
+                            <input type="date" name="start_date" class="form-control" value="<?php echo date('Y-m-d'); ?>">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Expected End Date</label>
+                            <input type="date" name="expected_end_date" class="form-control">
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <button type="submit" name="create_workspace" class="btn btn-primary">
+                            <i class="fas fa-save me-1"></i> Create Workspace
+                        </button>
+                        <a href="workspaces.php" class="btn btn-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <?php
+    include '../includes/footer.php';
+    exit();
+}
 
 // ============================================
 // GET WORKSPACE DATA
@@ -26,7 +88,7 @@ if (!$workspace) {
 }
 
 // ============================================
-// GET INPUTS (Merged - Raw Materials + Expenses)
+// GET INPUTS
 // ============================================
 
 $inputs = $pdo->prepare("
@@ -51,7 +113,7 @@ $outputs->execute([$workspace_id]);
 $outputs = $outputs->fetchAll();
 $total_output_value = array_sum(array_column($outputs, 'total_value'));
 
-// Calculate profit/loss (Output - Input)
+// Calculate profit/loss
 $profit_loss = $total_output_value - $total_input_cost;
 
 // ============================================
@@ -68,7 +130,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_input'])) {
     $notes = sanitize($_POST['notes'] ?? '');
     
     try {
-        // For expenses, total_cost is the amount directly
         if ($input_type == 'expense') {
             $total_cost = floatval($_POST['expense_amount'] ?? 0);
             $quantity = null;
@@ -78,7 +139,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_input'])) {
                 throw new Exception("Expense amount must be greater than 0.");
             }
         } else {
-            // Raw material - calculate total_cost
             if ($quantity <= 0) {
                 throw new Exception("Quantity must be greater than 0.");
             }
@@ -154,6 +214,41 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_output'])) {
 }
 
 // ============================================
+// DELETE WORKSPACE
+// ============================================
+
+if (isset($_GET['action']) && $_GET['action'] == 'delete') {
+    try {
+        $check = $pdo->prepare("SELECT id, name FROM workspaces WHERE id = ? AND branch_id = ?");
+        $check->execute([$workspace_id, $branch_id]);
+        $workspace_check = $check->fetch();
+        
+        if (!$workspace_check) {
+            throw new Exception("Workspace not found.");
+        }
+        
+        $count_inputs = $pdo->prepare("SELECT COUNT(*) FROM workspace_inputs WHERE workspace_id = ?");
+        $count_inputs->execute([$workspace_id]);
+        $inputs_count = $count_inputs->fetchColumn();
+        
+        $count_outputs = $pdo->prepare("SELECT COUNT(*) FROM workspace_outputs WHERE workspace_id = ?");
+        $count_outputs->execute([$workspace_id]);
+        $outputs_count = $count_outputs->fetchColumn();
+        
+        $stmt = $pdo->prepare("DELETE FROM workspaces WHERE id = ? AND branch_id = ?");
+        $stmt->execute([$workspace_id, $branch_id]);
+        
+        logAction($pdo, 'Workspace Delete', "Deleted workspace: {$workspace_check['name']}");
+        
+        $_SESSION['workspace_message'] = '<div class="alert alert-success">✅ Workspace "' . htmlspecialchars($workspace_check['name']) . '" deleted successfully!</div>';
+        redirect('workspaces.php');
+        
+    } catch (Exception $e) {
+        $message = '<div class="alert alert-danger">❌ Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
+    }
+}
+
+// ============================================
 // UPDATE WORKSPACE STATUS
 // ============================================
 
@@ -179,45 +274,6 @@ if (isset($_GET['action']) && $_GET['action'] == 'resume') {
     $message = '<div class="alert alert-success">▶️ Workspace resumed.</div>';
     $workspace['status'] = 'active';
     logAction($pdo, 'Workspace Resume', "Resumed workspace #$workspace_id");
-}
-
-// ============================================
-// DELETE WORKSPACE
-// ============================================
-
-if (isset($_GET['action']) && $_GET['action'] == 'delete') {
-    try {
-        // Check if workspace exists
-        $check = $pdo->prepare("SELECT id, name FROM workspaces WHERE id = ? AND branch_id = ?");
-        $check->execute([$workspace_id, $branch_id]);
-        $workspace_check = $check->fetch();
-        
-        if (!$workspace_check) {
-            throw new Exception("Workspace not found.");
-        }
-        
-        // Count inputs and outputs for the confirmation message
-        $count_inputs = $pdo->prepare("SELECT COUNT(*) FROM workspace_inputs WHERE workspace_id = ?");
-        $count_inputs->execute([$workspace_id]);
-        $inputs_count = $count_inputs->fetchColumn();
-        
-        $count_outputs = $pdo->prepare("SELECT COUNT(*) FROM workspace_outputs WHERE workspace_id = ?");
-        $count_outputs->execute([$workspace_id]);
-        $outputs_count = $count_outputs->fetchColumn();
-        
-        // Delete workspace (cascade will delete inputs and outputs)
-        $stmt = $pdo->prepare("DELETE FROM workspaces WHERE id = ? AND branch_id = ?");
-        $stmt->execute([$workspace_id, $branch_id]);
-        
-        logAction($pdo, 'Workspace Delete', "Deleted workspace: {$workspace_check['name']} (ID: $workspace_id) with $inputs_count inputs and $outputs_count outputs");
-        
-        // Redirect to workspaces list with success message
-        $_SESSION['workspace_message'] = '<div class="alert alert-success">✅ Workspace "' . htmlspecialchars($workspace_check['name']) . '" deleted successfully! (' . $inputs_count . ' inputs, ' . $outputs_count . ' outputs removed)</div>';
-        redirect('workspaces.php');
-        
-    } catch (Exception $e) {
-        $message = '<div class="alert alert-danger">❌ Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
-    }
 }
 
 include '../includes/header.php';
@@ -253,10 +309,8 @@ include '../includes/sidebar.php';
                 <i class="fas fa-play me-1"></i> Resume
             </a>
             <?php endif; ?>
-            
-            <!-- Delete Button -->
             <a href="?id=<?php echo $workspace_id; ?>&action=delete" class="btn btn-danger" 
-               onclick="return confirmDeleteWorkspace()">
+               onclick="return confirm('⚠️ Delete this workspace? All inputs and outputs will be lost.')">
                 <i class="fas fa-trash me-1"></i> Delete
             </a>
         </div>
@@ -264,7 +318,7 @@ include '../includes/sidebar.php';
 
     <?php echo $message; ?>
 
-    <!-- Financial Summary Cards - 3 BAR CARDS -->
+    <!-- Financial Summary - 3 BAR CARDS -->
     <div class="row g-3 mb-4">
         <div class="col-md-4 col-6">
             <div class="stat-card text-center">
@@ -317,7 +371,6 @@ include '../includes/sidebar.php';
     ============================================ -->
     <?php if($active_tab == 'overview'): ?>
     <div class="row">
-        <!-- Summary Table -->
         <div class="col-md-6">
             <div class="card shadow-sm">
                 <div class="card-header bg-primary text-white">
@@ -341,7 +394,6 @@ include '../includes/sidebar.php';
                 </div>
             </div>
         </div>
-        
         <div class="col-md-6">
             <div class="card shadow-sm">
                 <div class="card-header bg-info text-white">
@@ -366,7 +418,7 @@ include '../includes/sidebar.php';
     INPUTS TAB
     ============================================ -->
     <?php if($active_tab == 'inputs'): ?>
-    <!-- Add Input/Expense Form -->
+    <!-- Add Input Form -->
     <div class="card shadow-sm mb-4">
         <div class="card-header bg-success text-white">
             <h5 class="mb-0"><i class="fas fa-plus-circle me-2"></i>Add Input</h5>
@@ -454,7 +506,6 @@ include '../includes/sidebar.php';
         }
     }
     
-    // Auto-calculate raw material total
     document.querySelector('input[name="quantity"]').addEventListener('input', calcRawTotal);
     document.querySelector('input[name="unit_cost"]').addEventListener('input', calcRawTotal);
     
@@ -547,7 +598,7 @@ include '../includes/sidebar.php';
                     </div>
                     <div class="col-md-8">
                         <label class="form-label">Notes</label>
-                        <input type="text" name="notes" class="form-control" placeholder="Optional notes about this batch">
+                        <input type="text" name="notes" class="form-control" placeholder="Optional notes">
                     </div>
                     <div class="col-12">
                         <button type="submit" name="add_output" class="btn btn-info text-white">
@@ -560,7 +611,6 @@ include '../includes/sidebar.php';
     </div>
 
     <script>
-    // Auto-calculate output total
     document.querySelector('input[name="quantity"]').addEventListener('input', calcOutputTotal);
     document.querySelector('input[name="unit_value"]').addEventListener('input', calcOutputTotal);
     
@@ -614,15 +664,6 @@ include '../includes/sidebar.php';
     </div>
     <?php endif; ?>
 </div>
-
-<!-- ============================================
-DELETE CONFIRMATION SCRIPT
-============================================ -->
-<script>
-function confirmDeleteWorkspace() {
-    return confirm('⚠️ Are you sure you want to delete this workspace?\n\nAll inputs and outputs will be permanently deleted.\n\nThis action CANNOT be undone!');
-}
-</script>
 
 <style>
 .stat-card {

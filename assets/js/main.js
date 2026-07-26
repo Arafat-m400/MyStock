@@ -411,3 +411,50 @@ function debounce(func, wait) {
         timeout = setTimeout(later, wait);
     };
 }
+
+// ============================================
+// Close all modals
+// ============================================
+function closeAllModals() {
+    document.querySelectorAll('.modal.show').forEach(function(modalElement) {
+        const modal = bootstrap.Modal.getInstance(modalElement);
+        if (modal) {
+            modal.hide();
+        }
+    });
+    // Remove any lingering backdrops
+    document.querySelectorAll('.modal-backdrop').forEach(function(backdrop) {
+        backdrop.remove();
+    });
+    document.body.classList.remove('modal-open');
+}
+
+// ============================================
+// Auto-close modals after form submission
+// ============================================
+document.addEventListener('DOMContentLoaded', function() {
+    // Listen for form submissions inside modals
+    document.querySelectorAll('.modal form').forEach(function(form) {
+        form.addEventListener('submit', function() {
+            // Let the form submit, but we'll check for success after page reload
+            // The success alert will trigger the close
+        });
+    });
+    
+    // Check for success message on page load
+    const successAlert = document.querySelector('.alert-success');
+    if (successAlert) {
+        const successKeywords = ['added', 'created', 'updated', 'saved', 'completed', 'recorded'];
+        const alertText = successAlert.textContent.toLowerCase();
+        const shouldClose = successKeywords.some(function(keyword) {
+            return alertText.includes(keyword);
+        });
+        
+        if (shouldClose) {
+            // Close any open modals after a slight delay
+            setTimeout(function() {
+                closeAllModals();
+            }, 500);
+        }
+    }
+});

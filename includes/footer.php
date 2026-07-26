@@ -34,5 +34,37 @@
             }, 5000);
         });
     </script>
+
+    <!-- ============================================
+AUTO-CLOSE MODALS AFTER SUCCESSFUL SUBMISSION
+============================================ -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Check if there's a success alert that indicates a successful submission
+    const successAlert = document.querySelector('.alert-success');
+    if (successAlert) {
+        // If the alert contains "added", "created", "updated", "saved", "completed", "recorded"
+        const successKeywords = ['added', 'created', 'updated', 'saved', 'completed', 'recorded', 'deleted'];
+        const alertText = successAlert.textContent.toLowerCase();
+        const shouldClose = successKeywords.some(keyword => alertText.includes(keyword));
+        
+        if (shouldClose) {
+            // Find any open modal and close it
+            const openModals = document.querySelectorAll('.modal.show');
+            openModals.forEach(function(modalElement) {
+                const modal = bootstrap.Modal.getInstance(modalElement);
+                if (modal) {
+                    modal.hide();
+                    // Remove backdrop
+                    document.querySelectorAll('.modal-backdrop').forEach(function(backdrop) {
+                        backdrop.remove();
+                    });
+                    document.body.classList.remove('modal-open');
+                }
+            });
+        }
+    }
+});
+</script>
 </body>
 </html>

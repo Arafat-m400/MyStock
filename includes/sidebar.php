@@ -1,6 +1,6 @@
 <?php if(!isset($_SESSION)) session_start(); ?>
 
-<div class="col-md-2 sidebar p-3">
+<div class="col-md-2 sidebar p-2" id="mainSidebar">
     <nav class="nav flex-column">
         <div class="nav-section">Main</div>
         <a class="nav-link <?php echo basename($_SERVER['PHP_SELF']) == 'dashboard.php' ? 'active' : ''; ?>" href="/MyStock/branch/dashboard.php">
@@ -45,3 +45,40 @@
         </a>
     </nav>
 </div>
+
+<!-- Sidebar Overlay for Mobile -->
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Mobile sidebar toggle
+    const sidebar = document.getElementById('mainSidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    
+    // Create toggle button if it doesn't exist
+    let toggleBtn = document.getElementById('sidebarToggle');
+    if (!toggleBtn) {
+        toggleBtn = document.createElement('button');
+        toggleBtn.id = 'sidebarToggle';
+        toggleBtn.className = 'btn btn-sm btn-light d-md-none position-fixed';
+        toggleBtn.style.cssText = 'bottom:20px; left:20px; z-index:1060; border-radius:50%; width:50px; height:50px; box-shadow:0 4px 15px rgba(0,0,0,0.2);';
+        toggleBtn.innerHTML = '<i class="fas fa-bars"></i>';
+        document.body.appendChild(toggleBtn);
+    }
+    
+    // Toggle sidebar
+    toggleBtn.addEventListener('click', function() {
+        sidebar.classList.toggle('show');
+        overlay.classList.toggle('show');
+        toggleBtn.innerHTML = sidebar.classList.contains('show') ? 
+            '<i class="fas fa-times"></i>' : 
+            '<i class="fas fa-bars"></i>';
+    });
+    
+    overlay.addEventListener('click', function() {
+        sidebar.classList.remove('show');
+        overlay.classList.remove('show');
+        toggleBtn.innerHTML = '<i class="fas fa-bars"></i>';
+    });
+});
+</script>

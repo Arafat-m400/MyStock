@@ -1,17 +1,24 @@
-            </div> <!-- Close row -->
+</div> <!-- Close row -->
         </div> <!-- Close container-fluid -->
     </div> <!-- Close wrapper -->
 
     <footer class="bg-white border-top py-2 mt-auto">
         <div class="container-fluid">
             <div class="row">
-                <div class="col-md-6 text-center text-md-start">
+                <div class="col-12 text-center">
                     <small class="text-muted">
-                        &copy; <?php echo date('Y'); ?> MyStock v2.0 - Enterprise Stock Management
+                        &copy; <?php echo date('Y'); ?> 
+                        <?php 
+                        $stmt = $pdo->prepare("SELECT company_name FROM settings WHERE id = 1");
+                        $stmt->execute();
+                        $settings_row = $stmt->fetch();
+                        $company_name = $settings_row['company_name'] ?? 'MyStock';
+                        echo htmlspecialchars($company_name); 
+                        ?> 
+                        <span class="d-none d-sm-inline">- Stock Management</span>
                     </small>
-                </div>
-                <div class="col-md-6 text-center text-md-end">
-                    <small class="text-muted">
+                    <br>
+                    <small class="text-muted d-sm-none">
                         <i class="fas fa-store me-1"></i>
                         <?php echo htmlspecialchars(getCurrentBranchName() ?? 'No Branch'); ?>
                     </small>
@@ -32,39 +39,25 @@
                     bsAlert.close();
                 });
             }, 5000);
+            
+            // Close modal on success
+            const successAlert = document.querySelector('.alert-success');
+            if (successAlert) {
+                const keywords = ['added', 'created', 'updated', 'saved', 'completed', 'recorded', 'deleted'];
+                const text = successAlert.textContent.toLowerCase();
+                const shouldClose = keywords.some(function(k) { return text.includes(k); });
+                if (shouldClose) {
+                    setTimeout(function() {
+                        document.querySelectorAll('.modal.show').forEach(function(modalEl) {
+                            var modal = bootstrap.Modal.getInstance(modalEl);
+                            if (modal) modal.hide();
+                        });
+                        document.querySelectorAll('.modal-backdrop').forEach(function(b) { b.remove(); });
+                        document.body.classList.remove('modal-open');
+                    }, 1500);
+                }
+            }
         });
     </script>
-
-    <!-- ============================================
-AUTO-CLOSE MODALS AFTER SUCCESSFUL SUBMISSION
-============================================ -->
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Check if there's a success alert that indicates a successful submission
-    const successAlert = document.querySelector('.alert-success');
-    if (successAlert) {
-        // If the alert contains "added", "created", "updated", "saved", "completed", "recorded"
-        const successKeywords = ['added', 'created', 'updated', 'saved', 'completed', 'recorded', 'deleted'];
-        const alertText = successAlert.textContent.toLowerCase();
-        const shouldClose = successKeywords.some(keyword => alertText.includes(keyword));
-        
-        if (shouldClose) {
-            // Find any open modal and close it
-            const openModals = document.querySelectorAll('.modal.show');
-            openModals.forEach(function(modalElement) {
-                const modal = bootstrap.Modal.getInstance(modalElement);
-                if (modal) {
-                    modal.hide();
-                    // Remove backdrop
-                    document.querySelectorAll('.modal-backdrop').forEach(function(backdrop) {
-                        backdrop.remove();
-                    });
-                    document.body.classList.remove('modal-open');
-                }
-            });
-        }
-    }
-});
-</script>
 </body>
 </html>

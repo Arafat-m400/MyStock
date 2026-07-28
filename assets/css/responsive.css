@@ -1,276 +1,165 @@
 /* ============================================
-   MyStock v2.0 - Responsive Styles
-   Mobile-First Design
+   MyStock v2.0 - Mobile Responsive
    ============================================ */
 
-/* ============================================
-   Mobile First (Default)
-   ============================================ */
-
-/* Small screens (phones) */
-@media (max-width: 576px) {
-    /* Typography */
-    h1 { font-size: 1.8rem; }
-    h2 { font-size: 1.5rem; }
-    h3 { font-size: 1.2rem; }
-    h4 { font-size: 1rem; }
-    h5 { font-size: 0.9rem; }
-    
-    /* Layout */
-    .container-fluid {
-        padding: 0 10px;
-    }
-    .p-4 {
-        padding: 15px !important;
-    }
-    .p-3 {
-        padding: 10px !important;
-    }
-    .m-4 {
-        margin: 15px !important;
-    }
-    
-    /* Cards */
-    .card-body {
-        padding: 15px;
-    }
-    .card-header {
-        padding: 12px 15px;
-    }
-    
-    /* Stats Cards - 2 columns on mobile */
-    .stat-card .stat-value {
-        font-size: 20px;
-    }
-    .stat-card .stat-icon {
-        width: 40px;
-        height: 40px;
-        font-size: 18px;
-    }
-    
-    /* Tables - Card View on Mobile */
-    .table-responsive {
-        border: none;
-    }
-    .table thead {
-        display: none;
-    }
-    .table tbody tr {
-        display: block;
-        background: white;
-        border-radius: 12px;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-        margin-bottom: 10px;
-        padding: 10px;
-    }
-    .table tbody td {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 5px 0;
-        border: none;
-    }
-    .table tbody td:before {
-        content: attr(data-label);
-        font-weight: 600;
-        color: #6c757d;
-        font-size: 12px;
-    }
-    
-    /* Forms */
-    .form-control, .form-select {
-        font-size: 16px; /* Prevents iOS zoom */
-        padding: 8px 12px;
-    }
-    
-    /* Buttons - Full width on mobile */
-    .btn {
-        width: 100%;
-        margin-bottom: 5px;
-    }
-    .btn-group {
-        display: flex;
-        flex-direction: column;
-        gap: 5px;
-    }
-    .btn-group .btn {
-        border-radius: 8px !important;
-    }
-    
-    /* Modal */
-    .modal-dialog {
-        margin: 10px;
-    }
-    .modal-body {
-        padding: 15px;
-    }
-    
-    /* Navbar */
-    .navbar-brand {
-        font-size: 1rem !important;
-    }
-    .branch-badge {
-        font-size: 0.6rem !important;
-        padding: 2px 8px !important;
-    }
-    
-    /* Grid - Single column */
-    .row {
-        margin: 0 -5px;
-    }
-    .col-md-3, .col-md-4, .col-md-6 {
-        padding: 0 5px;
-    }
-}
-
-/* ============================================
-   Tablet (Medium screens)
-   ============================================ */
-
-@media (min-width: 577px) and (max-width: 992px) {
-    /* Typography */
-    h1 { font-size: 2.2rem; }
-    h2 { font-size: 1.8rem; }
-    h3 { font-size: 1.4rem; }
-    
-    /* Layout */
-    .p-4 {
-        padding: 20px !important;
-    }
-    
-    /* Stats Cards - 3 columns on tablet */
-    .stat-card .stat-value {
-        font-size: 24px;
-    }
-    
-    /* Tables - Keep header but responsive */
-    .table {
-        font-size: 14px;
-    }
-    .table td, .table th {
-        padding: 8px 10px;
-    }
-    
-    /* Buttons - Inline on tablet */
-    .btn {
-        width: auto;
-    }
-    
-    /* Sidebar - Collapsible on tablet */
-    .sidebar {
-        position: fixed;
-        top: 60px;
-        left: -280px;
-        width: 280px;
-        height: 100vh;
-        background: white;
-        z-index: 1040;
-        transition: left 0.3s ease;
-        overflow-y: auto;
-        box-shadow: 2px 0 10px rgba(0,0,0,0.1);
-    }
-    .sidebar.show {
-        left: 0;
-    }
-    .sidebar-overlay {
-        display: none;
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.5);
-        z-index: 1039;
-    }
-    .sidebar-overlay.show {
-        display: block;
-    }
-}
-
-/* ============================================
-   Desktop (Large screens)
-   ============================================ */
-
-@media (min-width: 993px) {
-    /* Full layout */
-    .container-fluid {
-        padding: 0 20px;
-    }
-    
-    /* Stats Cards - 4 columns */
-    .stat-card .stat-value {
-        font-size: 28px;
-    }
-    
-    /* Tables - Full width */
-    .table {
-        font-size: 15px;
-    }
-    .table td, .table th {
-        padding: 12px 15px;
-    }
-    
-    /* Hover effects only on desktop */
-    .hover-lift:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-    }
-    
-    /* Multiple columns for dashboard */
-    .dashboard-grid {
-        display: grid;
-        grid-template-columns: 2fr 1fr;
-        gap: 20px;
-    }
-}
-
-/* ============================================
-   Touch-Friendly (All Devices)
-   ============================================ */
-
-/* Larger touch targets for mobile */
+/* ===== TOUCH FRIENDLY ===== */
 @media (hover: none) and (pointer: coarse) {
     .btn, .nav-link, .dropdown-item, 
     .table a, .card a, 
-    input, select, textarea {
+    input, select, textarea,
+    .sidebar .nav-link {
         min-height: 44px;
         min-width: 44px;
-        padding: 10px 15px;
     }
     
-    /* Prevent accidental clicks */
-    .dropdown-menu {
-        padding: 10px 0;
+    .btn-sm, .btn-group-sm .btn {
+        min-height: 36px;
+        min-width: 36px;
     }
+    
+    .btn-group .btn {
+        padding: 8px 12px;
+    }
+    
+    /* Larger tap targets for dropdowns */
     .dropdown-item {
         padding: 12px 20px;
+        font-size: 16px;
+    }
+    
+    /* Better touch feedback */
+    .btn:active, .nav-link:active {
+        opacity: 0.7;
+        transform: scale(0.97);
     }
 }
 
-/* ============================================
-   Dark Mode (Optional)
-   ============================================ */
-
-@media (prefers-color-scheme: dark) {
-    /* Will be implemented in future update */
+/* ===== MODAL ON MOBILE ===== */
+@media (max-width: 576px) {
+    .modal-dialog {
+        margin: 8px;
+        max-width: 100%;
+    }
+    .modal-body {
+        padding: 12px;
+        max-height: 60vh;
+        overflow-y: auto;
+    }
+    .modal-footer {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+    .modal-footer .btn {
+        flex: 1;
+        min-width: 100px;
+    }
 }
 
-/* ============================================
-   Print Styles (Overrides)
-   ============================================ */
+/* ===== SEARCH INPUT ON MOBILE ===== */
+@media (max-width: 576px) {
+    .search-container {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .search-container .form-control {
+        width: 100%;
+    }
+    .search-container .btn {
+        width: 100%;
+    }
+}
 
-@media print {
-    .sidebar, .navbar, footer, .no-print {
-        display: none !important;
+/* ===== DATA TABLES ===== */
+@media (max-width: 576px) {
+    .table tbody td .badge {
+        font-size: 10px !important;
+        padding: 2px 6px !important;
     }
-    body {
-        background: white !important;
+    .table tbody td .btn-group {
+        flex-direction: row;
+        gap: 4px;
     }
-    .card {
-        box-shadow: none !important;
-        border: 1px solid #ddd !important;
+    .table tbody td .btn-group .btn {
+        min-height: 32px;
+        min-width: 32px;
+        padding: 4px 8px;
+        font-size: 12px;
+        width: auto;
     }
-    .table td, .table th {
-        padding: 5px !important;
+}
+
+/* ===== STATS ON MOBILE ===== */
+@media (max-width: 576px) {
+    .stat-card {
+        padding: 10px 12px;
+        border-radius: 8px;
+    }
+    .stat-card .stat-value {
+        font-size: 16px;
+    }
+    .stat-card .stat-icon {
+        width: 30px;
+        height: 30px;
+    }
+    .stat-card .stat-icon i {
+        font-size: 14px;
+    }
+}
+
+/* ===== SIDEBAR OVERLAY ===== */
+.sidebar-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    z-index: 1039;
+}
+.sidebar-overlay.show {
+    display: block;
+}
+
+/* ===== BOTTOM NAVIGATION ON MOBILE ===== */
+@media (max-width: 576px) {
+    .bottom-nav {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        background: white;
+        border-top: 1px solid #e9ecef;
+        display: flex;
+        justify-content: space-around;
+        padding: 4px 0;
+        z-index: 1050;
+        box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+    }
+    .bottom-nav a {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        color: #6c757d;
+        font-size: 10px;
+        padding: 4px 8px;
+        text-decoration: none;
+        min-width: 50px;
+    }
+    .bottom-nav a i {
+        font-size: 18px;
+        margin-bottom: 2px;
+    }
+    .bottom-nav a.active {
+        color: #0d6efd;
+    }
+    .bottom-nav a.active i {
+        color: #0d6efd;
+    }
+    
+    /* Add padding to main content so it doesn't hide behind bottom nav */
+    .main-content {
+        padding-bottom: 70px !important;
     }
 }

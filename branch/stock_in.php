@@ -20,6 +20,11 @@ $suppliers = $pdo->prepare("SELECT id, name, phone, whatsapp FROM suppliers WHER
 $suppliers->execute([$branch_id]);
 $suppliers = $suppliers->fetchAll();
 
+// Categories for dropdown
+$categories = $pdo->prepare("SELECT id, name FROM categories WHERE branch_id = ? ORDER BY name");
+$categories->execute([$branch_id]);
+$categories = $categories->fetchAll();
+
 // ============================================
 // QUICK ADD STOCK (Direct Entry)
 // ============================================
@@ -54,17 +59,66 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['quick_add'])) {
             
         } catch (Exception $e) {
             $message = '<div class="alert alert-danger">❌ Error adding supplier: ' . htmlspecialchars($e->getMessage()) . '</div>';
-            // Don't proceed with stock addition if supplier creation failed
             $supplier_id = null;
         }
     }
     
+    // === START: Handle "new" product selection ===
+    $product_id = $_POST['product_id'];
+    
+    // If "new" product selected, create it first
+    if ($product_id == 'new') {
+        try {
+            $new_name = sanitize($_POST['new_product_name']);
+            $new_category_id = $_POST['new_product_category_id'] ?: null;
+            $new_unit = sanitize($_POST['new_product_unit'] ?? 'pcs');
+            $new_cost_price = floatval($_POST['new_product_cost_price'] ?? 0);
+            $new_selling_price = floatval($_POST['new_product_selling_price'] ?? 0);
+            $new_reorder_level = intval($_POST['new_product_reorder_level'] ?? 5);
+            
+            if (empty($new_name)) {
+                throw new Exception("Product name is required.");
+            }
+            
+            // Check for duplicate SKU (use name as SKU if not provided)
+            $sku = sanitize($_POST['new_product_sku'] ?? $new_name);
+            $sku_check = $pdo->prepare("SELECT id FROM products WHERE sku = ? AND branch_id = ?");
+            $sku_check->execute([$sku, $branch_id]);
+            if ($sku_check->fetch()) {
+                $sku = $sku . '-' . rand(100, 999);
+            }
+            
+            $stmt = $pdo->prepare("
+                INSERT INTO products (branch_id, name, sku, category_id, quantity, reorder_level, cost_price, selling_price, unit)
+                VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)
+            ");
+            $stmt->execute([$branch_id, $new_name, $sku, $new_category_id, $new_reorder_level, $new_cost_price, $new_selling_price, $new_unit]);
+            $product_id = $pdo->lastInsertId();
+            
+            logAction($pdo, 'Add Product', "Added product: $new_name (from stock_in)");
+            
+            // Refresh products list
+            $products = $pdo->prepare("SELECT id, name, sku, quantity, cost_price, selling_price, unit FROM products WHERE branch_id = ? ORDER BY name");
+            $products->execute([$branch_id]);
+            $products = $products->fetchAll();
+            
+            $message = '<div class="alert alert-success">✅ New product "' . htmlspecialchars($new_name) . '" created! Now adding stock...</div>';
+            
+        } catch (Exception $e) {
+            $message = '<div class="alert alert-danger">❌ Error creating product: ' . htmlspecialchars($e->getMessage()) . '</div>';
+            $product_id = null;
+        }
+    }
+    // === END: New Product Handling ===
+    
     // === FIX: Validate that supplier is selected ===
     if (empty($supplier_id)) {
         $message = '<div class="alert alert-danger">❌ Please select a supplier or add a new one.</div>';
+    } elseif (empty($product_id)) {
+        // Product creation failed or no product selected
+        // Message already set above
     } else {
         // === YOUR ORIGINAL CODE - UNCHANGED ===
-        $product_id = $_POST['product_id'];
         $quantity = intval($_POST['quantity']);
         $unit_price = floatval($_POST['unit_price']);
         $purchase_date = $_POST['purchase_date'] ?? date('Y-m-d');
@@ -209,7 +263,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['receive_items'])) {
 
         // Update PO status based on type
         if ($po['po_type'] == 'formal') {
-            // Check if all items received
             $check = $pdo->prepare("
                 SELECT COUNT(*) as total, 
                        SUM(CASE WHEN quantity_received >= quantity_ordered THEN 1 ELSE 0 END) as completed
@@ -228,11 +281,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['receive_items'])) {
                 ->execute([$status, $received_value, $po_id]);
             
         } else {
-            // Advance: calculate balance
             $advance_amount = $po['advance_amount'];
             $balance = $advance_amount - $received_value;
             
-            // Update advance balance
             $pdo->prepare("
                 UPDATE purchase_orders 
                 SET status = ?,
@@ -250,7 +301,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['receive_items'])) {
                 $po_id
             ]);
             
-            // Update supplier debt
             $pdo->prepare("
                 UPDATE suppliers 
                 SET total_debt = ?
@@ -280,15 +330,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['create_po'])) {
     try {
         $pdo->beginTransaction();
         
-        // === START: New Supplier Handling for PO ===
         $supplier_id = $_POST['supplier_id'];
         
-        // Validate supplier is selected
         if (empty($supplier_id)) {
             throw new Exception("Please select a supplier.");
         }
         
-        // If "new" supplier selected, create it
         if ($supplier_id == 'new') {
             $new_name = sanitize($_POST['po_new_supplier_name']);
             $new_phone = sanitize($_POST['po_new_supplier_phone']);
@@ -306,13 +353,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['create_po'])) {
             $stmt->execute([$branch_id, $new_name, $new_phone, $new_whatsapp, $new_email]);
             $supplier_id = $pdo->lastInsertId();
             
-            // Refresh suppliers list
             $suppliers = $pdo->prepare("SELECT id, name, phone, whatsapp FROM suppliers WHERE branch_id = ? ORDER BY name");
             $suppliers->execute([$branch_id]);
             $suppliers = $suppliers->fetchAll();
         }
-        // === END: New Supplier Handling for PO ===
         
+        // === START: Handle "new" product in PO ===
         $po_type = $_POST['po_type'];
         $order_date = $_POST['order_date'];
         $expected_delivery = $_POST['expected_delivery'] ?: null;
@@ -323,61 +369,129 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['create_po'])) {
             if (empty($items)) throw new Exception("No items added.");
             
             $total_amount = 0;
-            foreach ($items as $item) {
-                $total_amount += $item['quantity'] * $item['unit_price'];
+            $new_product_ids = [];
+            
+            foreach ($items as &$item) {
+                // If product_id is 'new', create the product first
+                if ($item['product_id'] == 'new') {
+                    $new_name = sanitize($item['new_product_name']);
+                    $new_category_id = $item['new_product_category_id'] ?: null;
+                    $new_unit = sanitize($item['new_product_unit'] ?? 'pcs');
+                    $new_cost_price = floatval($item['new_product_cost_price'] ?? 0);
+                    $new_selling_price = floatval($item['new_product_selling_price'] ?? 0);
+                    $new_reorder_level = intval($item['new_product_reorder_level'] ?? 5);
+                    
+                    if (empty($new_name)) {
+                        throw new Exception("Product name is required for new product.");
+                    }
+                    
+                    $sku = sanitize($item['new_product_sku'] ?? $new_name);
+                    $sku_check = $pdo->prepare("SELECT id FROM products WHERE sku = ? AND branch_id = ?");
+                    $sku_check->execute([$sku, $branch_id]);
+                    if ($sku_check->fetch()) {
+                        $sku = $sku . '-' . rand(100, 999);
+                    }
+                    
+                    $stmt = $pdo->prepare("
+                        INSERT INTO products (branch_id, name, sku, category_id, quantity, reorder_level, cost_price, selling_price, unit)
+                        VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)
+                    ");
+                    $stmt->execute([$branch_id, $new_name, $sku, $new_category_id, $new_reorder_level, $new_cost_price, $new_selling_price, $new_unit]);
+                    $new_product_id = $pdo->lastInsertId();
+                    
+                    logAction($pdo, 'Add Product', "Added product: $new_name (from PO)");
+                    $item['product_id'] = $new_product_id;
+                    $new_product_ids[] = $new_product_id;
+                    
+                    // Refresh products list
+                    $products = $pdo->prepare("SELECT id, name, sku, quantity, cost_price, selling_price, unit FROM products WHERE branch_id = ? ORDER BY name");
+                    $products->execute([$branch_id]);
+                    $products = $products->fetchAll();
+                }
+                
+                $qty = intval($item['quantity'] ?? 0);
+                $price = floatval($item['unit_price'] ?? 0);
+                if ($qty <= 0) throw new Exception("Every item needs a quantity greater than 0.");
+                if ($price < 0) throw new Exception("Unit price cannot be negative.");
+                $total_amount += $qty * $price;
             }
+            unset($item); // Break reference
             
             $po_number = 'PO-' . date('Ymd') . '-' . rand(1000, 9999);
             
-            $stmt = $pdo->prepare("INSERT INTO purchase_orders (branch_id, po_number, po_type, supplier_id, order_date, expected_delivery, total_amount, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute([$branch_id, $po_number, $po_type, $supplier_id, $order_date, $expected_delivery, $total_amount, $notes, $_SESSION['user_id']]);
+            $stmt = $pdo->prepare("
+                INSERT INTO purchase_orders (
+                    branch_id, po_number, po_type, supplier_id, order_date,
+                    expected_delivery, total_amount, notes, status, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+            ");
+            $stmt->execute([$branch_id, $po_number, $po_type, $supplier_id, $order_date,
+                           $expected_delivery, $total_amount, $notes, $_SESSION['user_id']]);
             $po_id = $pdo->lastInsertId();
             
+            $item_stmt = $pdo->prepare("
+                INSERT INTO purchase_order_items (
+                    po_id, product_id, quantity_ordered, quantity_received,
+                    unit_price, subtotal
+                ) VALUES (?, ?, ?, 0, ?, ?)
+            ");
             foreach ($items as $item) {
-                $stmt = $pdo->prepare("INSERT INTO purchase_order_items (po_id, product_id, quantity_ordered, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)");
-                $stmt->execute([$po_id, $item['product_id'], $item['quantity'], $item['unit_price'], $item['quantity'] * $item['unit_price']]);
+                $item_stmt->execute([$po_id, intval($item['product_id']), intval($item['quantity']), 
+                                    floatval($item['unit_price']), intval($item['quantity']) * floatval($item['unit_price'])]);
             }
             
             $success_msg = "✅ Formal Purchase Order Created!";
             
         } else {
-            // Cash Advance
             $advance_amount = floatval($_POST['advance_amount']);
             if ($advance_amount <= 0) throw new Exception("Advance amount must be greater than 0.");
             
             $po_number = 'ADV-' . date('Ymd') . '-' . rand(1000, 9999);
             
-            $stmt = $pdo->prepare("INSERT INTO purchase_orders (branch_id, po_number, po_type, supplier_id, order_date, expected_delivery, advance_amount, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute([$branch_id, $po_number, $po_type, $supplier_id, $order_date, $expected_delivery, $advance_amount, $notes, $_SESSION['user_id']]);
+            $stmt = $pdo->prepare("
+                INSERT INTO purchase_orders (
+                    branch_id, po_number, po_type, supplier_id, order_date,
+                    expected_delivery, advance_amount, balance, balance_direction,
+                    notes, status, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'supplier_owes', ?, 'pending', ?)
+            ");
+            $stmt->execute([$branch_id, $po_number, $po_type, $supplier_id, $order_date,
+                           $expected_delivery, $advance_amount, $advance_amount, $notes, $_SESSION['user_id']]);
             $po_id = $pdo->lastInsertId();
             
-            // Log the advance in topups
-            $stmt = $pdo->prepare("INSERT INTO po_topups (po_id, amount, notes, created_by) VALUES (?, ?, ?, ?)");
+            $stmt = $pdo->prepare("
+                INSERT INTO po_topups (po_id, amount, notes, created_by)
+                VALUES (?, ?, ?, ?)
+            ");
             $stmt->execute([$po_id, $advance_amount, "Initial advance", $_SESSION['user_id']]);
+            
+            $pdo->prepare("UPDATE suppliers SET total_traded = total_traded + ? WHERE id = ?")
+                ->execute([$advance_amount, $supplier_id]);
             
             $success_msg = "✅ Cash Advance Created! Supplier owes " . number_format($advance_amount, 0) . " RWF in goods.";
         }
         
         $pdo->commit();
         
-        // Get supplier for WhatsApp
         $supplier = $pdo->prepare("SELECT name, whatsapp FROM suppliers WHERE id = ?");
         $supplier->execute([$supplier_id]);
         $supp = $supplier->fetch();
         
         logAction($pdo, 'PO Created', "PO: $po_number, Type: $po_type");
         
+        $display_total = $po_type == 'formal' ? $total_amount : $advance_amount;
         $message = '<div class="alert alert-success alert-permanent">
             <i class="fas fa-check-circle me-2"></i>
             <strong>' . $success_msg . '</strong>
             <br>PO Number: <strong>' . $po_number . '</strong>
+            <br>Total: ' . number_format($display_total, 0) . ' RWF
             <br>
             <div class="mt-2">
                 <a href="view_po.php?id=' . $po_id . '" target="_blank" class="btn btn-sm btn-info">
                     <i class="fas fa-eye me-1"></i> View PO
                 </a>
                 ' . (!empty($supp['whatsapp']) && $po_type == 'formal' ? '
-                <a href="https://wa.me/' . preg_replace('/[^0-9]/', '', $supp['whatsapp']) . '?text=' . urlencode("PO: $po_number\nSupplier: {$supp['name']}\nTotal: " . number_format($total_amount ?? $advance_amount, 0) . " RWF\n\nPlease confirm receipt.") . '" 
+                <a href="https://wa.me/' . preg_replace('/[^0-9]/', '', $supp['whatsapp']) . '?text=' . urlencode("PO: $po_number\nSupplier: {$supp['name']}\nTotal: " . number_format($display_total, 0) . " RWF\n\nPlease confirm receipt.") . '" 
                    target="_blank" class="btn btn-sm btn-success">
                     <i class="fab fa-whatsapp me-1"></i> Send to Supplier
                 </a>' : '') . '
@@ -449,10 +563,12 @@ include '../includes/sidebar.php';
         <div class="card-body">
             <form method="POST">
                 <div class="row g-3">
+                    <!-- ===== UPDATED: Product Dropdown with "Add New" option ===== -->
                     <div class="col-md-4">
                         <label class="form-label">Product *</label>
-                        <select name="product_id" class="form-select" required>
+                        <select name="product_id" id="product_select" class="form-select" required onchange="toggleNewProduct(this.value)">
                             <option value="">-- Select Product --</option>
+                            <option value="new">+ Add New Product</option>
                             <?php foreach($products as $p): ?>
                             <option value="<?php echo $p['id']; ?>">
                                 <?php echo htmlspecialchars($p['name']); ?> 
@@ -461,6 +577,50 @@ include '../includes/sidebar.php';
                             <?php endforeach; ?>
                         </select>
                     </div>
+                    
+                    <!-- ===== NEW: New Product Fields (hidden by default) ===== -->
+                    <div id="new_product_fields" style="display:none;" class="col-12">
+                        <div class="p-3 bg-light rounded border">
+                            <h6 class="mb-2"><i class="fas fa-box me-1"></i> New Product Details</h6>
+                            <div class="row g-2">
+                                <div class="col-md-4">
+                                    <label class="form-label">Product Name *</label>
+                                    <input type="text" name="new_product_name" class="form-control" placeholder="e.g., Maize Flour">
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label">SKU</label>
+                                    <input type="text" name="new_product_sku" class="form-control" placeholder="Optional">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Category</label>
+                                    <select name="new_product_category_id" class="form-select">
+                                        <option value="">-- None --</option>
+                                        <?php foreach($categories as $cat): ?>
+                                        <option value="<?php echo $cat['id']; ?>"><?php echo htmlspecialchars($cat['name']); ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Unit</label>
+                                    <input type="text" name="new_product_unit" class="form-control" placeholder="kg, pcs, liters...">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Cost Price (RWF)</label>
+                                    <input type="number" name="new_product_cost_price" class="form-control" placeholder="8500">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Selling Price (RWF)</label>
+                                    <input type="number" name="new_product_selling_price" class="form-control" placeholder="10000">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Reorder Level</label>
+                                    <input type="number" name="new_product_reorder_level" class="form-control" placeholder="5">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- ===== END NEW ===== -->
+                    
                     <div class="col-md-2">
                         <label class="form-label">Quantity *</label>
                         <input type="number" name="quantity" class="form-control" required min="1" placeholder="10">
@@ -470,7 +630,7 @@ include '../includes/sidebar.php';
                         <input type="number" name="unit_price" class="form-control" required min="0" placeholder="8500">
                     </div>
                     
-                    <!-- ===== UPDATED: Supplier Dropdown with "Add New" option ===== -->
+                    <!-- Supplier Dropdown -->
                     <div class="col-md-3">
                         <label class="form-label">Supplier *</label>
                         <select name="supplier_id" id="supplier_select" class="form-select" required onchange="toggleNewSupplier(this.value)">
@@ -482,7 +642,7 @@ include '../includes/sidebar.php';
                         </select>
                     </div>
                     
-                    <!-- ===== NEW: New Supplier Fields (hidden by default) ===== -->
+                    <!-- New Supplier Fields -->
                     <div id="new_supplier_fields" style="display:none;" class="col-12">
                         <div class="p-3 bg-light rounded border">
                             <h6 class="mb-2"><i class="fas fa-building me-1"></i> New Supplier Details</h6>
@@ -506,7 +666,6 @@ include '../includes/sidebar.php';
                             </div>
                         </div>
                     </div>
-                    <!-- ===== END NEW ===== -->
                     
                     <div class="col-md-4">
                         <label class="form-label">Purchase Date</label>
@@ -592,7 +751,7 @@ include '../includes/sidebar.php';
                         </select>
                     </div>
                     
-                    <!-- ===== UPDATED: Supplier Dropdown with "Add New" option ===== -->
+                    <!-- Supplier Dropdown -->
                     <div class="col-md-3">
                         <label class="form-label">Supplier *</label>
                         <select name="supplier_id" id="po_supplier_select" class="form-select" required onchange="togglePONewSupplier(this.value)">
@@ -606,7 +765,7 @@ include '../includes/sidebar.php';
                         </select>
                     </div>
                     
-                    <!-- ===== NEW: New Supplier Fields for PO (hidden by default) ===== -->
+                    <!-- New Supplier Fields for PO -->
                     <div id="po_new_supplier_fields" style="display:none;" class="col-12">
                         <div class="p-3 bg-light rounded border">
                             <h6 class="mb-2"><i class="fas fa-building me-1"></i> New Supplier Details</h6>
@@ -630,7 +789,6 @@ include '../includes/sidebar.php';
                             </div>
                         </div>
                     </div>
-                    <!-- ===== END NEW ===== -->
                     
                     <div class="col-md-3">
                         <label class="form-label">Order Date</label>
@@ -641,7 +799,7 @@ include '../includes/sidebar.php';
                         <input type="date" name="expected_delivery" class="form-control">
                     </div>
                 </div>
-                
+
                 <!-- Formal Order Section -->
                 <div id="formal_section">
                     <div class="mb-3">
@@ -650,12 +808,13 @@ include '../includes/sidebar.php';
                             <div class="col-md-5">
                                 <select id="po_product_select" class="form-select" onchange="onPOProductSelect(this)">
                                     <option value="">-- Select Product --</option>
+                                    <option value="new">+ Add New Product</option>
                                     <?php foreach($products as $p): ?>
-                                    <option value="<?php echo $p['id']; ?>" 
+                                    <option value="<?php echo $p['id']; ?>"
                                             data-name="<?php echo htmlspecialchars($p['name']); ?>"
                                             data-price="<?php echo $p['cost_price']; ?>"
                                             data-unit="<?php echo $p['unit']; ?>">
-                                        <?php echo htmlspecialchars($p['name']); ?> 
+                                        <?php echo htmlspecialchars($p['name']); ?>
                                         (Cost: <?php echo number_format($p['cost_price'], 0); ?> RWF)
                                     </option>
                                     <?php endforeach; ?>
@@ -674,8 +833,50 @@ include '../includes/sidebar.php';
                             </div>
                         </div>
                         <div id="po_selected_display" class="mt-2 small"></div>
+                        
+                        <!-- ===== NEW: New Product Fields for PO (hidden by default) ===== -->
+                        <div id="po_new_product_fields" style="display:none;" class="mt-2">
+                            <div class="p-3 bg-light rounded border">
+                                <h6 class="mb-2"><i class="fas fa-box me-1"></i> New Product Details</h6>
+                                <div class="row g-2">
+                                    <div class="col-md-4">
+                                        <label class="form-label">Product Name *</label>
+                                        <input type="text" id="po_new_product_name" class="form-control" placeholder="e.g., Maize Flour">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">SKU</label>
+                                        <input type="text" id="po_new_product_sku" class="form-control" placeholder="Optional">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">Category</label>
+                                        <select id="po_new_product_category_id" class="form-select">
+                                            <option value="">-- None --</option>
+                                            <?php foreach($categories as $cat): ?>
+                                            <option value="<?php echo $cat['id']; ?>"><?php echo htmlspecialchars($cat['name']); ?></option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">Unit</label>
+                                        <input type="text" id="po_new_product_unit" class="form-control" placeholder="kg, pcs, liters...">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">Cost Price (RWF)</label>
+                                        <input type="number" id="po_new_product_cost_price" class="form-control" placeholder="8500">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">Selling Price (RWF)</label>
+                                        <input type="number" id="po_new_product_selling_price" class="form-control" placeholder="10000">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label">Reorder Level</label>
+                                        <input type="number" id="po_new_product_reorder_level" class="form-control" placeholder="5">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    
+
                     <!-- PO Items Table -->
                     <div class="table-container mb-3">
                         <table class="table table-bordered table-sm">
@@ -701,7 +902,7 @@ include '../includes/sidebar.php';
                         </table>
                     </div>
                 </div>
-                
+
                 <!-- Cash Advance Section -->
                 <div id="advance_section" style="display:none;">
                     <div class="alert alert-info">
@@ -719,9 +920,9 @@ include '../includes/sidebar.php';
                         </div>
                     </div>
                 </div>
-                
+
                 <input type="hidden" name="items_json" id="po_items_json">
-                
+
                 <button type="submit" name="create_po" class="btn btn-success btn-lg w-100 mt-3">
                     <i class="fas fa-save me-2"></i> Create Purchase Order
                 </button>
@@ -796,6 +997,29 @@ let poCart = [];
 let poSelectedProduct = null;
 
 // ============================================
+// TOGGLE NEW PRODUCT FIELDS (Quick Add)
+// ============================================
+function toggleNewProduct(value) {
+    const fields = document.getElementById('new_product_fields');
+    if (value === 'new') {
+        fields.style.display = 'block';
+        document.querySelectorAll('#new_product_fields input').forEach(input => {
+            if (input.name === 'new_product_name') {
+                input.setAttribute('required', 'required');
+            }
+        });
+        // Remove required from product select since "new" is selected
+        document.getElementById('product_select').removeAttribute('required');
+    } else {
+        fields.style.display = 'none';
+        document.querySelectorAll('#new_product_fields input').forEach(input => {
+            input.removeAttribute('required');
+        });
+        document.getElementById('product_select').setAttribute('required', 'required');
+    }
+}
+
+// ============================================
 // TOGGLE NEW SUPPLIER FIELDS (Quick Add)
 // ============================================
 function toggleNewSupplier(value) {
@@ -835,6 +1059,24 @@ function togglePONewSupplier(value) {
     }
 }
 
+// ============================================
+// TOGGLE NEW PRODUCT FIELDS (PO)
+// ============================================
+function togglePONewProduct(value) {
+    const fields = document.getElementById('po_new_product_fields');
+    if (value === 'new') {
+        fields.style.display = 'block';
+        document.querySelectorAll('#po_new_product_fields input').forEach(input => {
+            input.setAttribute('required', 'required');
+        });
+    } else {
+        fields.style.display = 'none';
+        document.querySelectorAll('#po_new_product_fields input').forEach(input => {
+            input.removeAttribute('required');
+        });
+    }
+}
+
 function togglePOType() {
     const type = document.getElementById('po_type').value;
     document.getElementById('formal_section').style.display = type == 'formal' ? 'block' : 'none';
@@ -846,8 +1088,27 @@ function onPOProductSelect(select) {
     if (!option.value) {
         poSelectedProduct = null;
         document.getElementById('po_selected_display').innerHTML = '';
+        togglePONewProduct('');
         return;
     }
+    
+    // If "new" is selected, show product fields
+    if (option.value === 'new') {
+        poSelectedProduct = {
+            id: 'new',
+            name: 'New Product',
+            price: 0,
+            unit: ''
+        };
+        document.getElementById('po_selected_display').innerHTML = 
+            '<span class="badge bg-success">✓ Adding a new product</span>';
+        togglePONewProduct('new');
+        document.getElementById('po_qty').focus();
+        return;
+    }
+    
+    togglePONewProduct('');
+    
     poSelectedProduct = {
         id: option.value,
         name: option.dataset.name,
@@ -865,33 +1126,66 @@ function addPOItem() {
         alert('Please select a product first.');
         return;
     }
+    
+    let productId = poSelectedProduct.id;
+    let productName = poSelectedProduct.name;
+    
+    // If adding a new product, collect the details
+    if (productId === 'new') {
+        const newName = document.getElementById('po_new_product_name').value.trim();
+        if (!newName) {
+            alert('Please enter the new product name.');
+            return;
+        }
+        productName = newName;
+        
+        // Store new product data in the item
+        poSelectedProduct.new_product_data = {
+            name: newName,
+            sku: document.getElementById('po_new_product_sku').value,
+            category_id: document.getElementById('po_new_product_category_id').value,
+            unit: document.getElementById('po_new_product_unit').value,
+            cost_price: parseFloat(document.getElementById('po_new_product_cost_price').value) || 0,
+            selling_price: parseFloat(document.getElementById('po_new_product_selling_price').value) || 0,
+            reorder_level: parseInt(document.getElementById('po_new_product_reorder_level').value) || 5
+        };
+    }
+    
     const qty = parseInt(document.getElementById('po_qty').value);
     if (isNaN(qty) || qty < 1) {
         alert('Enter a valid quantity.');
         return;
     }
+
     const unitPrice = parseFloat(document.getElementById('po_unit_price').value);
     if (isNaN(unitPrice) || unitPrice < 0) {
         alert('Enter a valid unit price.');
         return;
     }
-    const existing = poCart.find(item => item.product_id === poSelectedProduct.id);
+
+    const existing = poCart.find(item => item.product_id === productId);
     if (existing) {
         existing.quantity += qty;
         existing.unit_price = unitPrice;
     } else {
-        poCart.push({
-            product_id: poSelectedProduct.id,
-            name: poSelectedProduct.name,
+        const item = {
+            product_id: productId,
+            name: productName,
             quantity: qty,
             unit_price: unitPrice
-        });
+        };
+        if (poSelectedProduct.new_product_data) {
+            item.new_product_data = poSelectedProduct.new_product_data;
+        }
+        poCart.push(item);
     }
+
     renderPOCart();
     document.getElementById('po_qty').value = 1;
     document.getElementById('po_unit_price').value = '';
     document.getElementById('po_product_select').value = '';
     document.getElementById('po_selected_display').innerHTML = '';
+    togglePONewProduct('');
     poSelectedProduct = null;
 }
 
@@ -907,9 +1201,10 @@ function renderPOCart() {
     poCart.forEach((item, index) => {
         const subtotal = item.quantity * item.unit_price;
         total += subtotal;
+        const isNew = item.product_id === 'new' || item.new_product_data;
         tbody.innerHTML += `
             <tr>
-                <td><strong>${escapeHtml(item.name)}</strong></td>
+                <td><strong>${escapeHtml(item.name)}</strong> ${isNew ? '<span class="badge bg-success">New</span>' : ''}</td>
                 <td><input type="number" min="1" value="${item.quantity}" class="form-control form-control-sm" style="width:80px;" onchange="updatePOQty(${index}, this.value)"></td>
                 <td><input type="number" min="0" value="${item.unit_price}" class="form-control form-control-sm" style="width:120px;" onchange="updatePOPrice(${index}, this.value)"></td>
                 <td><strong>${formatNumber(subtotal)}</strong></td>
@@ -948,7 +1243,6 @@ function updatePOTotals() {
 }
 
 function formatNumber(n) {
-    // Return raw number without formatting
     return Math.round(n);
 }
 

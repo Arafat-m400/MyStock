@@ -14,6 +14,12 @@ if (isLoggedIn()) {
 $error = '';
 $success = '';
 
+// Get company name from settings
+$stmt = $pdo->prepare("SELECT company_name FROM settings WHERE id = 1");
+$stmt->execute();
+$settings_row = $stmt->fetch();
+$company_name = $settings_row['company_name'] ?? 'MyStock';
+
 // Process login
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $username = trim($_POST['username']);
@@ -57,7 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - MyStock v2.0</title>
+    <title>Login - <?php echo htmlspecialchars($company_name); ?></title>
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
@@ -153,7 +159,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             <div class="login-card">
                 <div class="login-logo">
                     <i class="fas fa-store-alt"></i>
-                    <h2>MyStock</h2>
+                    <h2><?php echo htmlspecialchars($company_name); ?></h2>
                     <p>Enterprise Stock Management</p>
                 </div>
                 

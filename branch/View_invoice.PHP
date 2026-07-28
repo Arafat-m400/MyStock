@@ -37,6 +37,7 @@ $items = $items->fetchAll();
 
 // Company/branch info for the invoice header
 $settings = $pdo->query("SELECT * FROM settings WHERE id=1")->fetch();
+$company_name = $settings['company_name'] ?? 'MyStock';
 
 include '../includes/header.php';
 include '../includes/sidebar.php';

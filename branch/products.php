@@ -4,7 +4,7 @@ requireLogin();
 requireBranchAccess();
 
 $branch_id = getCurrentBranch();
-$is_admin = isAdmin();  // Use the actual function
+$is_admin = isAdmin();
 $message = '';
 
 // ============================================
@@ -54,10 +54,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['save_product'])) {
     }
 }
 
-// Delete Product
+// ============================================
+// DELETE PRODUCT - UPDATED
+// ============================================
+
 if (isset($_GET['delete']) && is_numeric($_GET['delete']) && $is_admin) {
     $id = $_GET['delete'];
-
+    
+    // Check if product is used in active records
     $sale_check = $pdo->prepare("SELECT COUNT(*) FROM sale_items WHERE product_id = ?");
     $sale_check->execute([$id]);
     $sale_count = $sale_check->fetchColumn();
@@ -69,22 +73,63 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete']) && $is_admin) {
     $po_check = $pdo->prepare("SELECT COUNT(*) FROM purchase_order_items WHERE product_id = ?");
     $po_check->execute([$id]);
     $po_item_count = $po_check->fetchColumn();
+    
+    $workspace_input_check = $pdo->prepare("SELECT COUNT(*) FROM workspace_inputs WHERE product_id = ?");
+    $workspace_input_check->execute([$id]);
+    $workspace_input_count = $workspace_input_check->fetchColumn();
+    
+    $workspace_output_check = $pdo->prepare("SELECT COUNT(*) FROM workspace_outputs WHERE product_id = ?");
+    $workspace_output_check->execute([$id]);
+    $workspace_output_count = $workspace_output_check->fetchColumn();
 
-    if ($sale_count > 0 || $purchase_count > 0 || $po_item_count > 0) {
+    $has_history = ($sale_count > 0 || $purchase_count > 0 || $po_item_count > 0 || 
+                    $workspace_input_count > 0 || $workspace_output_count > 0);
+
+    if ($has_history) {
+        // Warn user but allow deletion with ON DELETE SET NULL
         $parts = [];
         if ($sale_count > 0)     $parts[] = "$sale_count sale record(s)";
         if ($purchase_count > 0) $parts[] = "$purchase_count purchase record(s)";
         if ($po_item_count > 0)  $parts[] = "$po_item_count purchase order item(s)";
-        $message = '<div class="alert alert-warning">⚠️ Cannot delete: this product has ' . implode(' and ', $parts) . '. '
-                 . 'Consider marking it Inactive instead of deleting it, so your sales/purchase history stays intact.</div>';
+        if ($workspace_input_count > 0)  $parts[] = "$workspace_input_count workspace input(s)";
+        if ($workspace_output_count > 0) $parts[] = "$workspace_output_count workspace output(s)";
+        
+        // Show warning with option to proceed
+        $warning_message = '⚠️ This product has ' . implode(' and ', $parts) . ' in history. Deleting will set product_id to NULL in those records (history remains intact).';
+        
+        // Check if user confirmed the delete with history
+        if (isset($_GET['confirm']) && $_GET['confirm'] == 'yes') {
+            try {
+                // Delete product (ON DELETE SET NULL will handle the rest)
+                $stmt = $pdo->prepare("DELETE FROM products WHERE id = ? AND branch_id = ?");
+                $stmt->execute([$id, $branch_id]);
+                $message = '<div class="alert alert-success">✅ Product deleted! History records preserved (product references set to NULL).</div>';
+                logAction($pdo, 'Delete Product', "Deleted product ID: $id (with history)");
+            } catch (PDOException $e) {
+                $message = '<div class="alert alert-danger">❌ Error: ' . $e->getMessage() . '</div>';
+            }
+        } else {
+            // Show warning with delete button
+            $message = '<div class="alert alert-warning">
+                <strong>' . $warning_message . '</strong>
+                <br><br>
+                <a href="?delete=' . $id . '&confirm=yes" class="btn btn-danger">
+                    <i class="fas fa-trash me-1"></i> Yes, Delete Anyway
+                </a>
+                <a href="products.php" class="btn btn-secondary">
+                    <i class="fas fa-times me-1"></i> Cancel
+                </a>
+            </div>';
+        }
     } else {
+        // No history - safe to delete
         try {
             $stmt = $pdo->prepare("DELETE FROM products WHERE id = ? AND branch_id = ?");
             $stmt->execute([$id, $branch_id]);
-            $message = '<div class="alert alert-success">✅ Product deleted!</div>';
+            $message = '<div class="alert alert-success">✅ Product deleted successfully!</div>';
             logAction($pdo, 'Delete Product', "Deleted product ID: $id");
         } catch (PDOException $e) {
-            $message = '<div class="alert alert-danger">❌ Could not delete this product — it may still be referenced elsewhere in the system.</div>';
+            $message = '<div class="alert alert-danger">❌ Error: ' . $e->getMessage() . '</div>';
         }
     }
 }
@@ -165,7 +210,7 @@ include '../includes/sidebar.php';
             <div class="row g-2 align-items-end">
                 <div class="col-md-3">
                     <label class="form-label">Search</label>
-                    <input type="text" id="searchInput" class="form-control" placeholder="🔍 Search products..." onkeyup="filterProducts()">
+                    <input type="text" id="searchInput" class="form-control" onkeyup="filterProducts()">
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">Filter by Category</label>
@@ -222,9 +267,9 @@ include '../includes/sidebar.php';
              data-name="<?php echo strtolower(htmlspecialchars($product['name'])); ?>"
              data-category="<?php echo strtolower(htmlspecialchars($product['category_name'] ?? '')); ?>"
              data-stock="<?php echo $stock_status; ?>">
-            <a href="?view=<?php echo $product['id']; ?>" class="text-decoration-none">
-                <div class="card product-card h-100">
-                    <div class="card-body">
+            <div class="card product-card h-100">
+                <div class="card-body">
+                    <a href="?view=<?php echo $product['id']; ?>" class="text-decoration-none">
                         <div class="d-flex justify-content-between align-items-start mb-2">
                             <div class="product-icon">
                                 <i class="fas fa-box"></i>
@@ -274,9 +319,20 @@ include '../includes/sidebar.php';
                                 Reorder at <?php echo $product['reorder_level']; ?> <?php echo $product['unit']; ?>
                             </small>
                         </div>
+                    </a>
+                    
+                    <!-- ===== DELETE BUTTON ON PRODUCT CARD ===== -->
+                    <?php if($is_admin): ?>
+                    <div class="mt-2 text-end">
+                        <a href="?delete=<?php echo $product['id']; ?>" 
+                           class="btn btn-danger btn-sm"
+                           onclick="return confirmDeleteProduct('<?php echo htmlspecialchars($product['name']); ?>')">
+                            <i class="fas fa-trash"></i> Delete
+                        </a>
                     </div>
+                    <?php endif; ?>
                 </div>
-            </a>
+            </div>
         </div>
         <?php endforeach; ?>
         
@@ -349,8 +405,7 @@ include '../includes/sidebar.php';
                                 <div class="mb-2">
                                     <label class="form-label">Unit</label>
                                     <input type="text" name="unit" class="form-control"
-                                           value="<?php echo htmlspecialchars($edit_product['unit'] ?? 'pcs'); ?>"
-                                           placeholder="pcs, kg, boxes...">
+                                           value="<?php echo htmlspecialchars($edit_product['unit'] ?? 'pcs'); ?>">
                                 </div>
                             </div>
                         </div>
@@ -359,14 +414,14 @@ include '../includes/sidebar.php';
                             <div class="col-md-4">
                                 <div class="mb-2">
                                     <label class="form-label">Quantity</label>
-                                    <input type="number" name="quantity" class="form-control" min="0"
+                                    <input type="number" name="quantity" class="form-control"
                                            value="<?php echo $edit_product['quantity'] ?? 0; ?>">
                                 </div>
                             </div>
                             <div class="col-md-4">
                                 <div class="mb-2">
                                     <label class="form-label">Reorder Level</label>
-                                    <input type="number" name="reorder_level" class="form-control" min="0"
+                                    <input type="number" name="reorder_level" class="form-control"
                                            value="<?php echo $edit_product['reorder_level'] ?? 5; ?>">
                                     <small class="text-muted">Alert when stock ≤ this</small>
                                 </div>
@@ -386,23 +441,22 @@ include '../includes/sidebar.php';
                             <div class="col-md-6">
                                 <div class="mb-2">
                                     <label class="form-label">Cost Price (RWF)</label>
-                                    <input type="number" step="any" name="cost_price" class="form-control"
-                                           value="<?php echo $edit_product['cost_price'] ?? 0; ?>" min="0">
+                                    <input type="number" name="cost_price" class="form-control"
+                                           value="<?php echo $edit_product['cost_price'] ?? 0; ?>">
                                 </div>
                             </div>
                             <div class="col-md-6">
                                 <div class="mb-2">
                                     <label class="form-label">Selling Price (RWF)</label>
-                                    <input type="number" step="any" name="selling_price" class="form-control"
-                                           value="<?php echo $edit_product['selling_price'] ?? 0; ?>" min="0">
+                                    <input type="number" name="selling_price" class="form-control"
+                                           value="<?php echo $edit_product['selling_price'] ?? 0; ?>">
                                 </div>
                             </div>
                         </div>
                         
                         <div class="mb-2">
                             <label class="form-label">Description</label>
-                            <textarea name="description" class="form-control" rows="2"
-                                      placeholder="Product description (optional)"><?php echo htmlspecialchars($edit_product['description'] ?? ''); ?></textarea>
+                            <textarea name="description" class="form-control" rows="2"><?php echo htmlspecialchars($edit_product['description'] ?? ''); ?></textarea>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -436,6 +490,10 @@ include '../includes/sidebar.php';
                         <?php if($is_admin): ?>
                         <a href="?edit=<?php echo $detail_product['id']; ?>" class="btn btn-sm btn-light me-2">
                             <i class="fas fa-edit"></i> Edit
+                        </a>
+                        <a href="?delete=<?php echo $detail_product['id']; ?>" class="btn btn-sm btn-danger me-2"
+                           onclick="return confirmDeleteProduct('<?php echo htmlspecialchars($detail_product['name']); ?>')">
+                            <i class="fas fa-trash"></i> Delete
                         </a>
                         <?php endif; ?>
                         <a href="products.php" class="btn-close btn-close-white"></a>
@@ -536,9 +594,6 @@ include '../includes/sidebar.php';
                                     </div>
                                 </div>
                                 <div class="col-md-6">
-                                    <!-- ============================================
-                                    STOCK HISTORY - No Workspace References
-                                    ============================================ -->
                                     <div class="card">
                                         <div class="card-body">
                                             <h6><i class="fas fa-history me-2 text-info"></i>Stock History</h6>
@@ -681,6 +736,10 @@ include '../includes/sidebar.php';
                     <a href="?edit=<?php echo $detail_product['id']; ?>" class="btn btn-primary">
                         <i class="fas fa-edit me-1"></i> Edit Product
                     </a>
+                    <a href="?delete=<?php echo $detail_product['id']; ?>" class="btn btn-danger"
+                       onclick="return confirmDeleteProduct('<?php echo htmlspecialchars($detail_product['name']); ?>')">
+                        <i class="fas fa-trash me-1"></i> Delete Product
+                    </a>
                     <?php endif; ?>
                 </div>
             </div>
@@ -712,6 +771,14 @@ function filterProducts() {
     });
 }
 
+function confirmDeleteProduct(name) {
+    return confirm('⚠️ Delete product "' + name + '"?\n\n' +
+                   '• Past sales and purchase records will be preserved\n' +
+                   '• Product references in history will become "Deleted Product"\n' +
+                   '• Stock value and future calculations will update\n\n' +
+                   'This action CANNOT be undone!');
+}
+
 // Auto-show modal if add/edit parameter is present
 <?php if(isset($_GET['add']) || $edit_product): ?>
 document.addEventListener('DOMContentLoaded', function() {
@@ -725,6 +792,7 @@ document.addEventListener('DOMContentLoaded', function() {
 .product-card {
     transition: all 0.3s ease;
     border: 2px solid transparent;
+    position: relative;
 }
 .product-card:hover {
     transform: translateY(-5px);

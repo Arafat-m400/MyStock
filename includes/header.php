@@ -3,7 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MyStock v2.0 - <?php echo $_SESSION['branch_name'] ?? 'Enterprise'; ?></title>
+    
+    <?php
+    // Get company name from settings
+    $stmt = $pdo->prepare("SELECT company_name FROM settings WHERE id = 1");
+    $stmt->execute();
+    $settings_row = $stmt->fetch();
+    $company_name = $settings_row['company_name'] ?? 'MyStock';
+    ?>
+    
+    <title><?php echo htmlspecialchars($company_name); ?> - <?php echo $_SESSION['branch_name'] ?? 'Enterprise'; ?></title>
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
@@ -165,7 +174,8 @@
     <nav class="navbar navbar-mystock navbar-expand-lg">
         <div class="container-fluid">
             <a class="navbar-brand" href="/MyStock/branch/dashboard.php">
-                <i class="fas fa-store-alt"></i> MyStock
+                <i class="fas fa-store-alt"></i> 
+                <?php echo htmlspecialchars($company_name); ?>
             </a>
             
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">

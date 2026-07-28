@@ -15,7 +15,7 @@ if (isset($_SESSION['workspace_message'])) {
 }
 
 // ============================================
-// CREATE WORKSPACE - FIXED (NO SESSION CONFLICT)
+// CREATE WORKSPACE
 // ============================================
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['create_workspace'])) {
@@ -25,7 +25,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['create_workspace'])) {
     $expected_end_date = $_POST['expected_end_date'] ?: null;
     
     try {
-        // ALWAYS insert a NEW workspace - never update existing
         $stmt = $pdo->prepare("
             INSERT INTO workspaces (branch_id, name, description, start_date, expected_end_date, created_by)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -33,14 +32,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['create_workspace'])) {
         $stmt->execute([$branch_id, $name, $description, $start_date, $expected_end_date, $_SESSION['user_id']]);
         $workspace_id = $pdo->lastInsertId();
         
-        // Set success message with the NEW ID
         $_SESSION['workspace_message'] = '<div class="alert alert-success">
             <i class="fas fa-check-circle me-2"></i>
             <strong>✅ Workspace created!</strong>
             <a href="workspace_details.php?id=' . $workspace_id . '" class="alert-link">View Details</a>
         </div>';
         
-        // Redirect to clear POST data
         header("Location: workspaces.php");
         exit();
         
@@ -71,25 +68,22 @@ $workspaces = $pdo->prepare("
 $workspaces->execute([$branch_id]);
 $workspaces = $workspaces->fetchAll();
 
-// Calculate profit/loss
 foreach ($workspaces as &$ws) {
     $ws['profit_loss'] = $ws['total_output_value'] - $ws['total_input_cost'];
 }
-unset($ws); // Break the reference
+unset($ws);
 
 include '../includes/header.php';
 include '../includes/sidebar.php';
 ?>
 
 <div class="col-md-10 main-content">
-    <!-- Header -->
     <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
         <div>
             <h2><i class="fas fa-industry me-2 text-primary"></i>Workspace</h2>
             <p class="text-muted">Manage production workflows, track raw materials, expenses, outputs, and profitability</p>
         </div>
         <div>
-            <!-- ===== MODAL BUTTON ===== -->
             <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createWorkspaceModal">
                 <i class="fas fa-plus me-1"></i> New Workspace
             </button>
@@ -98,9 +92,7 @@ include '../includes/sidebar.php';
 
     <?php echo $message; ?>
 
-    <!-- ============================================
-    CREATE WORKSPACE MODAL
-    ============================================ -->
+    <!-- Create Workspace Modal -->
     <div class="modal fade" id="createWorkspaceModal" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -112,11 +104,11 @@ include '../includes/sidebar.php';
                     <div class="modal-body">
                         <div class="mb-3">
                             <label class="form-label">Workspace Name *</label>
-                            <input type="text" name="name" class="form-control" required placeholder="Enter workspace name">
+                            <input type="text" name="name" class="form-control" required>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Description</label>
-                            <textarea name="description" class="form-control" rows="3" placeholder="Describe the production process..."></textarea>
+                            <textarea name="description" class="form-control" rows="3"></textarea>
                         </div>
                         <div class="row g-3">
                             <div class="col-md-6">
@@ -140,15 +132,13 @@ include '../includes/sidebar.php';
         </div>
     </div>
 
-    <!-- ============================================
-    WORKSPACES LIST - ROW STYLE
-    ============================================ -->
+    <!-- Workspace List -->
     <?php if(empty($workspaces)): ?>
     <div class="card shadow-sm">
         <div class="card-body text-center py-5">
             <i class="fas fa-industry fa-4x text-muted mb-3 d-block"></i>
             <h5>No Workspaces</h5>
-            <p class="text-muted">Create your first production workspace to track raw materials, expenses, and outputs.</p>
+            <p class="text-muted">Create your first production workspace.</p>
             <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createWorkspaceModal">
                 <i class="fas fa-plus me-1"></i> Create Workspace
             </button>
@@ -156,7 +146,6 @@ include '../includes/sidebar.php';
     </div>
     <?php else: ?>
     
-    <!-- Workspace Rows -->
     <?php foreach($workspaces as $ws): 
         $status_class = [
             'active' => 'success',
@@ -169,7 +158,6 @@ include '../includes/sidebar.php';
     <div class="card shadow-sm mb-3" data-workspace-id="<?php echo $ws['id']; ?>">
         <div class="card-body p-3">
             <div class="row align-items-center">
-                <!-- Workspace Name & Status -->
                 <div class="col-md-3">
                     <h5 class="mb-0">
                         <i class="fas fa-industry text-primary me-2"></i>
@@ -183,7 +171,6 @@ include '../includes/sidebar.php';
                     <?php endif; ?>
                 </div>
                 
-                <!-- Financial Summary - 3 Bar Cards -->
                 <div class="col-md-6">
                     <div class="row g-1">
                         <div class="col-4">
@@ -216,7 +203,6 @@ include '../includes/sidebar.php';
                     </small>
                 </div>
                 
-                <!-- Actions -->
                 <div class="col-md-3 text-md-end mt-2 mt-md-0">
                     <a href="workspace_details.php?id=<?php echo $ws['id']; ?>" class="btn btn-primary btn-sm">
                         <i class="fas fa-eye me-1"></i> Manage
@@ -235,12 +221,8 @@ include '../includes/sidebar.php';
     <?php endif; ?>
 </div>
 
-<!-- ============================================
-AUTO-CLOSE MODAL ON SUCCESS
-============================================ -->
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // If there's a success message, close the modal
     const successAlert = document.querySelector('.alert-success');
     if (successAlert && successAlert.innerHTML.includes('Workspace created')) {
         const modalElement = document.getElementById('createWorkspaceModal');
@@ -249,7 +231,6 @@ document.addEventListener('DOMContentLoaded', function() {
             if (modal) {
                 modal.hide();
             }
-            // Remove backdrop
             document.querySelectorAll('.modal-backdrop').forEach(function(backdrop) {
                 backdrop.remove();
             });

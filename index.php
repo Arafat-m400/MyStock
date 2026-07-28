@@ -6,6 +6,13 @@ if (!isLoggedIn()) {
     redirect('login.php');
 }
 
+// If user only has one branch, redirect directly (admins always see the full picker instead)
+if (!isAdmin() && count($_SESSION['user_branches'] ?? []) == 1) {
+    $branch_id = $_SESSION['user_branches'][0];
+    switchBranch($branch_id);
+    redirect('branch/dashboard.php');
+}
+
 // Get user's branches
 $branches = getUserBranches($pdo, $_SESSION['user_id']);
 
@@ -22,13 +29,19 @@ if (isAdmin()) {
 } else {
     $all_branches = $branches;
 }
+
+// Get company name from settings
+$stmt = $pdo->prepare("SELECT company_name FROM settings WHERE id = 1");
+$stmt->execute();
+$settings_row = $stmt->fetch();
+$company_name = $settings_row['company_name'] ?? 'MyStock';
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MyStock - Select Branch</title>
+    <title><?php echo htmlspecialchars($company_name); ?> - Select Branch</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -157,12 +170,12 @@ if (isAdmin()) {
                 <div class="logo">
                     <i class="fas fa-store-alt"></i>
                 </div>
-                <h1>MyStock</h1>
+                <h1><?php echo htmlspecialchars($company_name); ?></h1>
                 <p class="subtitle">
                     Welcome back, <?php echo htmlspecialchars($_SESSION['full_name']); ?>!
                     <br><small>Select your branch to continue</small>
                 </p>
-                
+
                 <?php if(isset($error)): ?>
                 <div class="alert alert-danger">
                     <i class="fas fa-exclamation-circle me-2"></i>
@@ -180,12 +193,12 @@ if (isAdmin()) {
                     <?php endif; ?>
                 </div>
                 <?php else: ?>
-                
+
                 <div class="branch-grid">
-                    <?php foreach($all_branches as $branch): 
+                    <?php foreach($all_branches as $branch):
                         $is_active = $branch['status'] == 'active';
                         $has_access = false;
-                        
+
                         // Check if user has access to this branch
                         foreach($branches as $user_branch) {
                             if ($user_branch['id'] == $branch['id']) {
@@ -194,14 +207,14 @@ if (isAdmin()) {
                                 break;
                             }
                         }
-                        
+
                         // Admin can access all branches
                         if (isAdmin()) {
                             $has_access = true;
                             $user_role = 'admin';
                         }
                     ?>
-                    <a href="select_branch.php?id=<?php echo $branch['id']; ?>" 
+                    <a href="select_branch.php?id=<?php echo $branch['id']; ?>"
                        class="branch-item <?php echo !$is_active ? 'inactive' : ''; ?>"
                        onclick="return <?php echo $has_access ? 'true' : 'confirm("You don\'t have direct access to this branch. Continue anyway?");'; ?>">
                         <div class="icon">
@@ -220,7 +233,7 @@ if (isAdmin()) {
                             <?php else: ?>
                             <span class="badge bg-secondary">No Access</span>
                             <?php endif; ?>
-                            
+
                             <?php if($is_active): ?>
                             <span class="badge bg-success">Active</span>
                             <?php else: ?>
@@ -231,7 +244,7 @@ if (isAdmin()) {
                     <?php endforeach; ?>
                 </div>
                 <?php endif; ?>
-                
+
                 <div class="footer-links">
                     <a href="logout.php"><i class="fas fa-sign-out-alt me-1"></i>Logout</a>
                     <?php if(isAdmin()): ?>

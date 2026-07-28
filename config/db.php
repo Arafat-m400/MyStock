@@ -189,31 +189,42 @@ function getLowStockProducts($pdo, $branch_id = null) {
 }
 
 // ============================================
-// PRODUCT DETAILS FUNCTION (No workspace references)
+// GET COMPANY NAME
+// ============================================
+
+function getCompanyName($pdo) {
+    $stmt = $pdo->prepare("SELECT company_name FROM settings WHERE id = 1");
+    $stmt->execute();
+    $result = $stmt->fetch();
+    return $result['company_name'] ?? 'MyStock';
+}
+
+// ============================================
+// PRODUCT DETAILS FUNCTION (Updated for deleted products)
 // ============================================
 
 /**
  * Get product details including sales, purchases, and stock history
- * NOTE: Workspace is now standalone and NOT connected to products
+ * Handles deleted products (product_id = NULL) gracefully
  */
 function getProductDetails($pdo, $product_id, $branch_id) {
     // Sales history
-    $sales = $pdo->prepare("
-        SELECT 
-            s.id,
-            s.invoice_no,
-            s.sale_date,
-            si.quantity,
-            si.selling_price,
-            si.subtotal,
-            c.name as customer_name
-        FROM sale_items si
-        JOIN sales s ON si.sale_id = s.id
-        LEFT JOIN customers c ON s.customer_id = c.id
-        WHERE si.product_id = ? AND s.branch_id = ?
-        ORDER BY s.sale_date DESC
-        LIMIT 20
-    ");
+$sales = $pdo->prepare("
+    SELECT 
+        s.id,
+        s.invoice_no,
+        s.sale_date,
+        si.quantity,
+        si.selling_price,
+        si.subtotal,
+        COALESCE(c.name, 'Deleted Product') as customer_name
+    FROM sale_items si
+    JOIN sales s ON si.sale_id = s.id
+    LEFT JOIN customers c ON s.customer_id = c.id
+    WHERE si.product_id = ? AND s.branch_id = ?
+    ORDER BY s.sale_date DESC
+    LIMIT 20
+");
     $sales->execute([$product_id, $branch_id]);
     $sales_data = $sales->fetchAll();
     
@@ -226,7 +237,7 @@ function getProductDetails($pdo, $product_id, $branch_id) {
             pi.subtotal,
             p.purchase_date,
             p.invoice_no,
-            s.name as supplier_name
+            COALESCE(s.name, 'Deleted Supplier') as supplier_name
         FROM purchase_items pi
         JOIN purchases p ON pi.purchase_id = p.id
         LEFT JOIN suppliers s ON p.supplier_id = s.id
@@ -237,7 +248,7 @@ function getProductDetails($pdo, $product_id, $branch_id) {
     $purchases->execute([$product_id, $branch_id]);
     $purchase_data = $purchases->fetchAll();
     
-    // Stock history (from purchases only - workspace is standalone)
+    // Stock history (from purchases only)
     $stock_history = $pdo->prepare("
         SELECT 
             p.purchase_date as date,
@@ -245,7 +256,7 @@ function getProductDetails($pdo, $product_id, $branch_id) {
                 WHEN p.invoice_no LIKE 'PO-%' THEN 'Advance PO'
                 ELSE 'Regular Purchase'
             END as type,
-            s.name as supplier_name,
+            COALESCE(s.name, 'Deleted Supplier') as supplier_name,
             pi.quantity as quantity_change,
             pi.unit_price,
             p.invoice_no,

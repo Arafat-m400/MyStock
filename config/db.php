@@ -9,11 +9,10 @@ header("Pragma: no-cache");
 header("Expires: 0");
 
 // Database settings
-$host = 'localhost';
-$dbname = 'mystock_v2';
-$username = 'root';
-$password = '';
-
+$host = 'sql305.infinityfree.com';
+$dbname = 'if0_42516829_mystock';    // Your database name
+$username = 'if0_42516829';          // Your username
+$password = '12006800Beulla';        // Your password
 // Error reporting (disable in production)
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
